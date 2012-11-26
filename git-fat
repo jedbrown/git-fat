@@ -98,7 +98,7 @@ class GitFat(object):
         fd, tmpname = tempfile.mkstemp(dir=self.objdir)
         try:
             ishanging = False
-            cached = False                # changes to True when file is cached, means we
+            cached = False                # changes to True when file is cached
             with os.fdopen(fd, 'w') as cache:
                 outstream = cache
                 blockiter = readblocks(sys.stdin)
@@ -116,9 +116,13 @@ class GitFat(object):
             digest = h.hexdigest()
             objfile = os.path.join(self.objdir, digest)
             if not ishanging:
-                os.rename(tmpname, objfile)
+                if os.path.exists(objfile):
+                    self.verbose('git-fat filter-clean: cache already exists %s' % objfile)
+                    os.remove(tmpname)
+                else:
+                    os.rename(tmpname, objfile)
+                    self.verbose('git-fat filter-clean: caching to %s' % objfile)
                 cached = True
-                self.verbose('git-fat filter-clean: caching to %s' % objfile)
                 sys.stdout.write(self.encode(digest))
         finally:
             if not cached:
@@ -181,6 +185,8 @@ class GitFat(object):
             print('Garbage objects:')
             for g in garbage:
                 print('    ' + g)
+    def is_dirty(self):
+        return subprocess.call(['git', 'diff-index', '--quiet', 'HEAD']) == 0
     def cmd_push(self):
         'Push anything that I have stored and referenced'
         self.setup()
@@ -198,10 +204,10 @@ class GitFat(object):
             objpath = os.path.join(self.objdir, digest)
             if os.access(objpath, os.R_OK):
                 print('Restoring %s -> %s' % (digest, fname))
-                shutil.copy(objpath, fname)
+                os.utime(fname, None)
+                subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname])
             elif show_orphans:
                 print('Data unavailable: %s %s' % (digest,fname))
-        subprocess.call(['git', 'checkout', '.'])
     def cmd_pull(self, args):
         'Pull anything that I have referenced, but not stored'
         self.setup()
