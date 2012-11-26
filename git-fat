@@ -39,6 +39,23 @@ def cat_iter(initer, outstream):
         outstream.write(block)
 def cat(instream, outstream):
     return cat_iter(readblocks(instream), outstream)
+def gitconfig_get(name, file=None):
+    args = ['git', 'config', '--get']
+    if file is not None:
+        args += ['--file', file]
+    args.append(name)
+    p = subprocess.Popen(args, stdout=subprocess.PIPE)
+    output = p.communicate()[0].strip()
+    if p.returncode != 0:
+        return None
+    else:
+        return output
+def gitconfig_set(name, value, file=None):
+    args = ['git', 'config']
+    if file is not None:
+        args += ['--file', file]
+    args += [name, value]
+    p = subprocess.check_call(args)
 
 class GitFat(object):
     DecodeError = RuntimeError
@@ -50,17 +67,11 @@ class GitFat(object):
     def setup(self):
         mkdir_p(self.objdir)
     def get_rsync(self):
-        import ConfigParser
         cfgpath = os.path.join(self.gitroot,'.gitfat')
-        try:
-            config = ConfigParser.RawConfigParser()
-            config.read(cfgpath)
-            remote = config.get('rsync', 'remote')
-            if remote[0] in ['"', "'"] and remote[-1] in ['"', "'"]:
-                remote = remote[1:-1]
-            return remote
-        except ConfigParser.NoSectionError:
+        remote = gitconfig_get('rsync.remote', file=cfgpath)
+        if remote is None:
             raise RuntimeError('No rsync.remote in %s' % cfgpath)
+        return remote
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
     def encode(self, digest):
@@ -246,11 +257,12 @@ class GitFat(object):
             os.remove(fname)
     def cmd_init(self):
         self.setup()
-        open(os.path.join(self.gitroot,'.git','config'), 'a').writelines([
-            '[filter "fat"]\n',
-            '        clean  = git-fat filter-clean\n',
-            '        smudge = git-fat filter-smudge\n',
-            ])
+        if gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge'):
+            print('Git fat already configured, check configuration in .git/config')
+        else:
+            gitconfig_set('filter.fat.clean', 'git-fat filter-clean')
+            gitconfig_set('filter.fat.smudge', 'git-fat filter-smudge')
+            print('Initialized git fat')
 
 if __name__ == '__main__':
     fat = GitFat()
