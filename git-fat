@@ -188,11 +188,13 @@ class GitFat(object):
                 print('    ' + g)
     def is_dirty(self):
         return subprocess.call(['git', 'diff-index', '--quiet', 'HEAD']) == 0
-    def cmd_push(self):
+    def cmd_push(self, args):
         'Push anything that I have stored and referenced'
         self.setup()
-        # Pushing *all* objects because it's safer. Could implement partial push.
-        files = self.referenced_objects(all=True) & self.catalog_objects()
+        # Default to push only those objects referenced by current HEAD
+        # (includes history). Finer-grained pushing would be useful.
+        pushall = '--all' in args
+        files = self.referenced_objects(all=pushall) & self.catalog_objects()
         remote = self.get_rsync()
         self.verbose('Pushing to %s' % (remote))
         cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-', self.objdir + '/', remote]
@@ -200,7 +202,6 @@ class GitFat(object):
         p.communicate(input='\x00'.join(files))
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
-        orphans = []
         for digest, fname in self.orphan_files():
             objpath = os.path.join(self.objdir, digest)
             if os.access(objpath, os.R_OK):
@@ -263,7 +264,7 @@ if __name__ == '__main__':
     elif cmd == 'status':
         fat.cmd_status(sys.argv[2:])
     elif cmd == 'push':
-        fat.cmd_push()
+        fat.cmd_push(sys.argv[2:])
     elif cmd == 'pull':
         fat.cmd_pull(sys.argv[2:])
     elif cmd == 'gc':
