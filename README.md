@@ -149,6 +149,11 @@ The actual binary files are stored in `.git/fat/objects`, leaving `.git/objects`
     total 8
     -rw------- 1 jed users 6449 Nov 25 17:01 1f218834a137f7b185b498924e7a030008aee2ae
 
+If you have multiple clones that access the same filesystem, you can make
+`.git/fat/objects` a symlink to a common location, in which case all content
+will be available in all repositories without extra copies. You still need to
+`git fat push` to make it available to others.
+
 # Some refinements
 * Allow pulling and pushing only select files
 * Relate orphan objects to file system
