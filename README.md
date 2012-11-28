@@ -109,7 +109,7 @@ We can always get a summary of what fat objects are missing in our local cache.
     1f218834a137f7b185b498924e7a030008aee2ae
 
 Now get any objects referenced by our current `HEAD`. This command also
-accepts the `--all` option to pull full history, or a revspec to pull
+accepts the `--all` option to pull full history, or a revision to pull
 selected history.
 
     $ git fat pull
