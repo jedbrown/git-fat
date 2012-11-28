@@ -9,6 +9,7 @@ import os
 import subprocess
 import shlex
 import shutil
+import itertools
 
 BLOCK_SIZE = 4096
 
@@ -63,7 +64,14 @@ class GitFat(object):
         self.verbose = verbose_stderr if os.environ.get('GIT_FAT_VERBOSE') else verbose_ignore
         self.gitroot = subprocess.check_output('git rev-parse --show-toplevel'.split()).strip()
         self.objdir = os.path.join(self.gitroot, '.git', 'fat', 'objects')
-        self.magiclen = len(self.encode(hashlib.sha1('dummy').hexdigest()))
+        if os.environ.get('GIT_FAT_VERSION') == '1':
+            self.encode = self.encode_v1
+        else:
+            self.encode = self.encode_v2
+        def magiclen(enc):
+            return len(enc(hashlib.sha1('dummy').hexdigest(), 5))
+        self.magiclen = magiclen(self.encode) # Current version
+        self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
     def setup(self):
         mkdir_p(self.objdir)
     def get_rsync(self):
@@ -74,14 +82,21 @@ class GitFat(object):
         return remote
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
-    def encode(self, digest):
-        return '#$# git-fat %s\n' % digest
+    def encode_v1(self, digest, bytes):
+        'Produce legacy representation of file to be stored in repository.'
+        return '#$# git-fat %s\n' % (digest,)
+    def encode_v2(self, digest, bytes):
+        'Produce representation of file to be stored in repository. 20 characters can hold 64-bit integers.'
+        return '#$# git-fat %s %20d\n' % (digest, bytes)
     def decode(self, string, noraise=False):
         cookie = '#$# git-fat '
         if string.startswith(cookie):
-            return string[len(cookie):].split()[0]
+            parts = string[len(cookie):].split()
+            digest = parts[0]
+            bytes = int(parts[1]) if len(parts) > 1 else None
+            return digest, bytes
         elif noraise:
-            return None
+            return None, None
         else:
             raise GitFat.DecodeError('Could not decode %s' % (string))
     def decode_stream(self, stream):
@@ -90,22 +105,36 @@ class GitFat(object):
         try:
             return self.decode(preamble)
         except GitFat.DecodeError:
-            'Not sure if this is the right behavior'
-            return itertools.chain([preamble], readblocks(stream))
+            # Not sure if this is the right behavior
+            return itertools.chain([preamble], readblocks(stream)), None
     def decode_file(self, fname):
         # Fast check
         stat = os.stat(fname)
         if stat.st_size != self.magiclen:
-            return False
+            return False, None
         # read file
-        digest = self.decode_stream(open(fname))
+        digest, bytes = self.decode_stream(open(fname))
         if isinstance(digest, str):
-            return digest
+            return digest, bytes
         else:
-            return None
+            return None, bytes
+    def decode_clean(self, body):
+        '''
+        Attempt to decode version in working tree. The tree version could be changed to have a more
+        useful message than the machine-readable copy that goes into the repository. If the tree
+        version decodes successfully, it indicates that the fat data is not currently available in
+        this repository.
+        '''
+        digest, bytes = self.decode(body, noraise=True)
+        return digest
     def cmd_clean(self):
+        '''
+        The clean filter runs when a file is added to the index. It gets the "smudged" (tree)
+        version of the file on stdin and produces the "clean" (repository) version on stdout.
+        '''
         self.setup()
         h = hashlib.new('sha1')
+        bytes = 0
         fd, tmpname = tempfile.mkstemp(dir=self.objdir)
         try:
             ishanging = False
@@ -115,13 +144,15 @@ class GitFat(object):
                 blockiter = readblocks(sys.stdin)
                 # Check whether this file is hanging
                 block = next(blockiter)
-                if self.decode(block[0:self.magiclen], noraise=True):
+                if self.decode_clean(block[0:self.magiclen]):
                     ishanging = True
                     outstream = sys.stdout
                 h.update(block)
+                bytes += len(block)
                 outstream.write(block)
                 for block in blockiter:
                     h.update(block)
+                    bytes += len(block)
                     outstream.write(block)
                 outstream.flush()
             digest = h.hexdigest()
@@ -134,14 +165,14 @@ class GitFat(object):
                     os.rename(tmpname, objfile)
                     self.verbose('git-fat filter-clean: caching to %s' % objfile)
                 cached = True
-                sys.stdout.write(self.encode(digest))
+                sys.stdout.write(self.encode(digest, bytes))
         finally:
             if not cached:
                 os.remove(tmpname)
 
     def cmd_smudge(self):
         self.setup()
-        result = self.decode_stream(sys.stdin)
+        result, bytes = self.decode_stream(sys.stdin)
         if isinstance(result, str):       # We got a digest
             objfile = os.path.join(self.objdir, result)
             try:
@@ -149,10 +180,10 @@ class GitFat(object):
                 self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
             except IOError:                 # file not found
                 self.verbose('git-fat filter-smudge: fat object missing %s' % objfile)
-                sys.stdout.write(self.encode(result))   # could leave a better notice about how to recover this file
+                sys.stdout.write(self.encode(result, bytes))   # could leave a better notice about how to recover this file
         else:                             # We have an iterable over the original input.
             self.verbose('git-fat filter-smudge: not a managed file')
-            cat(result, sys.stdout)
+            cat_iter(result, sys.stdout)
     def catalog_objects(self):
         return set(os.listdir(self.objdir))
     def referenced_objects(self, rev=None, all=False):
@@ -167,14 +198,14 @@ class GitFat(object):
             p2.stdin.write(line.split()[0] + '\n')
         for line in p2.communicate()[0].splitlines():
             objhash, objtype, size = line.split()
-            if objtype == 'blob' and int(size) == self.magiclen:
-                fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))
+            if objtype == 'blob' and int(size) in self.magiclens:
+                fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
                 referenced.add(fathash)
         return referenced
     def orphan_files(self):
         'generator for all orphan placeholders in the working tree'
         for fname in subprocess.check_output(['git', 'ls-files']).splitlines():
-            digest = self.decode_file(fname)
+            digest = self.decode_file(fname)[0]
             if digest:
                 yield (digest, fname)
     def cmd_status(self, args):
