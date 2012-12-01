@@ -1,3 +1,21 @@
+# Introduction
+Checking large binary files into a source repository (Git or otherwise) is a bad idea because repository size quickly becomes unreasonable.
+Even if the instantaneous working tree stays manageable, preserving repository integrity requires all binary files in the entire project history, which given the typically poor compression of binary diffs, implies that the repository size will become impractically large.
+Some people recommend checking binaries into different repositories or even not versioning them at all, but these are not satisfying solutions for most workflows.
+
+## Features of `git-fat`
+* clones of the source repository are small and fast because no binaries are transferred, yet fully functional (unlike `git clone --depth`)
+* `git-fat` supports the same workflow for large binaries and traditionally versioned files, but internally manages the "fat" files separately
+* `git-bisect` works properly even when versions of the binary files change over time
+* selective control of which large files to pull into the local store
+* local fat object stores can be shared between multiple clones, even by different users
+* can easily support fat object stores distributed across multiple hosts
+* depends only on stock Python and rsync
+
+## Related projects
+* [git-annex](http://git-annex.branchable.com) is a far more comprehensive solution, but with less transparent workflow and with more dependencies.
+* [git-media](https://github.com/schacon/git-media) adopts a similar approach to `git-fat`, but with a different synchronization philosophy and with many Ruby dependencies.
+
 # Installation and configuration
 Place `git-fat` in your `PATH`.
 
