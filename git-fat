@@ -204,8 +204,11 @@ class GitFat(object):
         for line in p2.stdout:
             objhash, objtype, size = line.split()
             if objtype == 'blob' and int(size) in self.magiclens:
-                fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
-                referenced.add(fathash)
+                try:
+                    fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
+                    referenced.add(fathash)
+                except GitFat.DecodeError:
+                    pass
         cut_thread.join()
         p1.wait()
         p2.wait()
