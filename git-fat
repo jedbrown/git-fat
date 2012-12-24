@@ -10,6 +10,7 @@ import subprocess
 import shlex
 import shutil
 import itertools
+import threading
 
 BLOCK_SIZE = 4096
 
@@ -194,13 +195,20 @@ class GitFat(object):
             rev = self.revparse('HEAD')
         p1 = subprocess.Popen(['git','rev-list','--objects',rev], stdout=subprocess.PIPE)
         p2 = subprocess.Popen(['git','cat-file','--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-        for line in p1.communicate()[0].splitlines():
-            p2.stdin.write(line.split()[0] + '\n')
-        for line in p2.communicate()[0].splitlines():
+        def cut_sha1hash(input, output):
+            for line in input:
+                output.write(line.split()[0] + '\n')
+            output.close()
+        cut_thread = threading.Thread(target=cut_sha1hash, args=(p1.stdout, p2.stdin))
+        cut_thread.start()
+        for line in p2.stdout:
             objhash, objtype, size = line.split()
             if objtype == 'blob' and int(size) in self.magiclens:
                 fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
                 referenced.add(fathash)
+        cut_thread.join()
+        p1.wait()
+        p2.wait()
         return referenced
     def orphan_files(self):
         'generator for all orphan placeholders in the working tree'
