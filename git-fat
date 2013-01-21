@@ -129,12 +129,7 @@ class GitFat(object):
         '''
         digest, bytes = self.decode(body, noraise=True)
         return digest
-    def cmd_clean(self):
-        '''
-        The clean filter runs when a file is added to the index. It gets the "smudged" (tree)
-        version of the file on stdin and produces the "clean" (repository) version on stdout.
-        '''
-        self.setup()
+    def filter_clean(self, instream, outstreamclean):
         h = hashlib.new('sha1')
         bytes = 0
         fd, tmpname = tempfile.mkstemp(dir=self.objdir)
@@ -143,13 +138,13 @@ class GitFat(object):
             cached = False                # changes to True when file is cached
             with os.fdopen(fd, 'w') as cache:
                 outstream = cache
-                blockiter = readblocks(sys.stdin)
+                blockiter = readblocks(instream)
                 firstblock = True
-                for block in readblocks(sys.stdin):
+                for block in readblocks(instream):
                     if firstblock:
                         if len(block) == self.magiclen and self.decode_clean(block[0:self.magiclen]):
                             ishanging = True              # Working tree version is verbatim from repository (not smudged)
-                            outstream = sys.stdout
+                            outstream = outstreamclean
                         firstblock = False
                     h.update(block)
                     bytes += len(block)
@@ -165,12 +160,20 @@ class GitFat(object):
                     os.rename(tmpname, objfile)
                     self.verbose('git-fat filter-clean: caching to %s' % objfile)
                 cached = True
-                sys.stdout.write(self.encode(digest, bytes))
+                outstreamclean.write(self.encode(digest, bytes))
         finally:
             if not cached:
                 os.remove(tmpname)
 
-    def cmd_smudge(self):
+    def cmd_filter_clean(self):
+        '''
+        The clean filter runs when a file is added to the index. It gets the "smudged" (tree)
+        version of the file on stdin and produces the "clean" (repository) version on stdout.
+        '''
+        self.setup()
+        self.filter_clean(sys.stdin, sys.stdout)
+
+    def cmd_filter_smudge(self):
         self.setup()
         result, bytes = self.decode_stream(sys.stdin)
         if isinstance(result, str):       # We got a digest
@@ -309,9 +312,9 @@ if __name__ == '__main__':
     fat = GitFat()
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'filter-clean':
-        fat.cmd_clean()
+        fat.cmd_filter_clean()
     elif cmd == 'filter-smudge':
-        fat.cmd_smudge()
+        fat.cmd_filter_smudge()
     elif cmd == 'init':
         fat.cmd_init()
     elif cmd == 'status':
