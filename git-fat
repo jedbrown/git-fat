@@ -335,29 +335,31 @@ class GitFat(object):
     def gen_large_blobs(self, revs, threshsize):
         """Build dict of all blobs"""
         time0 = time.time()
-        def keep_blobs(input, output):
-            """The output of git rev-list --objects shows the path only for blobs, so we can filter on that criteria"""
-            # Test with awk '{if (NF>1) print $1}' is 5-10% faster (and less code), but less portable
+        def hash_only(input, output):
+            """The output of git rev-list --objects shows extra info for blobs, subdirectory trees, and tags.
+            This truncates to one hash per line.
+            """
             for line in input:
-                if len(line) != 40:
-                    output.write(line[:40] + '\n')
+                output.write(line[:40] + '\n')
             output.close()
         revlist = subprocess.Popen(['git', 'rev-list', '--all', '--objects'], stdout=subprocess.PIPE, bufsize=-1)
-        pblobcheck = subprocess.Popen(['git', 'cat-file', '--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=-1)
-        keepblobs = threading.Thread(target=keep_blobs, args=(revlist.stdout, pblobcheck.stdin))
-        keepblobs.start()
+        objcheck = subprocess.Popen(['git', 'cat-file', '--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=-1)
+        hashonly = threading.Thread(target=hash_only, args=(revlist.stdout, objcheck.stdin))
+        hashonly.start()
         numblobs = 0; numlarge = 1
         # Build dict with the sizes of all large blobs
-        for line in pblobcheck.stdout:
+        for line in objcheck.stdout:
             objhash, blob, size = line.split()
+            if blob != 'blob':
+                continue
             size = int(size)
             numblobs += 1
             if size > threshsize:
                 numlarge += 1
                 yield objhash, size
         revlist.wait()
-        pblobcheck.wait()
-        keepblobs.join()
+        objcheck.wait()
+        hashonly.join()
         time1 = time.time()
         self.verbose('%d of %d blobs are >= %d bytes [elapsed %.3fs]' % (numlarge, numblobs, threshsize, time1-time0))
     def cmd_find(self, args):
