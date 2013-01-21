@@ -190,7 +190,7 @@ Currently, this may only contain exact paths relative to the root of the
 repository. Finally, run
 
     git filter-branch --index-filter                 \
-        'git fat index-filter /tmp/fat-filter-files` \
+        'git fat index-filter /tmp/fat-filter-files' \
         --tag-name-filter cat -- --all
 
 When this finishes, inspect to see if everything is in order and follow
