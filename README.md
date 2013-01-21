@@ -158,6 +158,48 @@ Everything is in place
   treated specially.
 * Synchronize fat files with `git fat push` and `git fat pull`.
 
+## Retroactive import using `git filter-branch` [Experimental]
+
+Sometimes large objects were added to a repository by accident or for
+lack of a better place to put them. _If_ you are willing to rewrite
+history, forcing everyone to reclone, you can retroactively manage those
+files with `git fat`. Be sure that you understand the consequences of
+`git filter-branch` before attempting this. This feature is experimental
+and irreversible, so be doubly careful with backups.
+
+### Step 1: Locate the fat files
+
+Run `git fat find THRESH_BYTES > fat-files` and inspect `fat-files` in
+an editor. Lines will be sorted by the maximum object size that has been
+at each path, and look like
+
+    something.big           filter=fat -text #    8154677 1
+
+where the first number after the `#` is the number of bytes and the
+second number is the number of modifications that path has seen. You
+will normally filter out some of these paths using grep and/or an
+editor. When satisfied, remove the ends of the lines (including the `#`)
+and append to `.gitattributes`. It's best to `git checkout .` and commit
+at this time (likely enrolling some extant files into `git fat`).
+
+### Step 2: `filter-branch`
+
+Copy `.gitattributes` to `/tmp/fat-filter-files` and edit to remove
+everything after the file name (e.g., `sed s/ \+filter=fat.*$//`).
+Currently, this may only contain exact paths relative to the root of the
+repository. Finally, run
+
+    git filter-branch --index-filter                 \
+        'git fat index-filter /tmp/fat-filter-files` \
+        --tag-name-filter cat -- --all
+
+When this finishes, inspect to see if everything is in order and follow
+the
+[Checklist for Shrinking a Repository](http://www.kernel.org/pub/software/scm/git/docs/git-filter-branch.html#_checklist_for_shrinking_a_repository)
+in the `git filter-branch` man page, typically `git clone
+file:///path/to/repo`. Be sure to `git fat push` from the original
+repository.
+
 ## Implementation notes
 The actual binary files are stored in `.git/fat/objects`, leaving `.git/objects` nice and small.
 
