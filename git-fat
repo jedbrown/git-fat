@@ -64,7 +64,8 @@ class GitFat(object):
     def __init__(self):
         self.verbose = verbose_stderr if os.environ.get('GIT_FAT_VERBOSE') else verbose_ignore
         self.gitroot = subprocess.check_output('git rev-parse --show-toplevel'.split()).strip()
-        self.objdir = os.path.join(self.gitroot, '.git', 'fat', 'objects')
+        self.gitdir = subprocess.check_output('git rev-parse --git-dir'.split()).strip()
+        self.objdir = os.path.join(self.gitdir, 'fat', 'objects')
         if os.environ.get('GIT_FAT_VERSION') == '1':
             self.encode = self.encode_v1
         else:
