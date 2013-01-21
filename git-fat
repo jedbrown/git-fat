@@ -144,15 +144,13 @@ class GitFat(object):
             with os.fdopen(fd, 'w') as cache:
                 outstream = cache
                 blockiter = readblocks(sys.stdin)
-                # Check whether this file is hanging
-                block = next(blockiter)
-                if self.decode_clean(block[0:self.magiclen]):
-                    ishanging = True
-                    outstream = sys.stdout
-                h.update(block)
-                bytes += len(block)
-                outstream.write(block)
-                for block in blockiter:
+                firstblock = True
+                for block in readblocks(sys.stdin):
+                    if firstblock:
+                        if len(block) == self.magiclen and self.decode_clean(block[0:self.magiclen]):
+                            ishanging = True              # Working tree version is verbatim from repository (not smudged)
+                            outstream = sys.stdout
+                        firstblock = False
                     h.update(block)
                     bytes += len(block)
                     outstream.write(block)
