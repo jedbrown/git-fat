@@ -280,16 +280,16 @@ class GitFat(object):
         (remote, ssh_port, ssh_user) = self.get_rsync()
         self.verbose('Pushing to %s' % (remote))
 
-        if ssh_port == None and ssh_user == None:
-            cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-', self.objdir + '/', remote + '/']
-        else:
-            if ssh_user == None:
-              cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-', self.objdir + '/', '--rsh=ssh -p' + ssh_port, remote + '/']
-            else:
-              cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-', self.objdir + '/', '--rsh=ssh -l ' + ssh_user + '-p ' + ssh_port, remote + '/']
-
-        print( cmd )
-        p = subprocess.Popen(cmd, subprocess.PIPE)
+        cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-']
+        rshopts = ''
+        if ssh_user:
+            rshopts += ' -l ' + ssh_user
+        if ssh_port:
+            rshopts += ' -p ' + ssh_port
+        if rshopts:
+            cmd.append('--rsh=ssh' + rshopts)
+        cmd += [self.objdir + '/', remote + '/']
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input='\x00'.join(files))
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
