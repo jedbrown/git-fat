@@ -109,6 +109,23 @@ class GitFat(object):
         if remote is None:
             raise RuntimeError('No rsync.remote in %s' % cfgpath)
         return remote, ssh_port, ssh_user
+    def get_rsync_command(self,push):
+        (remote, ssh_port, ssh_user) = self.get_rsync()
+        if push:
+            self.verbose('Pushing to %s' % (remote))
+        else:
+            self.verbose('Pulling from %s' % (remote))
+
+        cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-']
+        rshopts = ''
+        if ssh_user:
+            rshopts += ' -l ' + ssh_user
+        if ssh_port:
+            rshopts += ' -p ' + ssh_port
+        if rshopts:
+            cmd.append('--rsh=ssh' + rshopts)
+        cmd += [self.objdir + '/', remote + '/']
+        return cmd
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
     def encode_v1(self, digest, bytes):
@@ -277,18 +294,7 @@ class GitFat(object):
         # (includes history). Finer-grained pushing would be useful.
         pushall = '--all' in args
         files = self.referenced_objects(all=pushall) & self.catalog_objects()
-        (remote, ssh_port, ssh_user) = self.get_rsync()
-        self.verbose('Pushing to %s' % (remote))
-
-        cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-']
-        rshopts = ''
-        if ssh_user:
-            rshopts += ' -l ' + ssh_user
-        if ssh_port:
-            rshopts += ' -p ' + ssh_port
-        if rshopts:
-            cmd.append('--rsh=ssh' + rshopts)
-        cmd += [self.objdir + '/', remote + '/']
+        cmd = self.get_rsync_command(push=True)
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input='\x00'.join(files))
     def checkout(self, show_orphans=False):
@@ -321,8 +327,7 @@ class GitFat(object):
             if rev:
                 refargs['rev'] = rev
         files = self.referenced_objects(**refargs) - self.catalog_objects()
-        remote = self.get_rsync()
-        cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-', remote + '/', self.objdir + '/']
+        cmd = self.get_rsync_command(push=False)
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input='\x00'.join(files))
         self.checkout()
