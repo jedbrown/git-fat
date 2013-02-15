@@ -179,7 +179,7 @@ where the first number after the `#` is the number of bytes and the
 second number is the number of modifications that path has seen. You
 will normally filter out some of these paths using grep and/or an
 editor. When satisfied, remove the ends of the lines (including the `#`)
-and append to `.gitattributes`. It's best to `git checkout .` and commit
+and append to `.gitattributes`. It's best to `git add .gitattributes` and commit
 at this time (likely enrolling some extant files into `git fat`).
 
 ### Step 2: `filter-branch`
@@ -190,15 +190,21 @@ Currently, this may only contain exact paths relative to the root of the
 repository. Finally, run
 
     git filter-branch --index-filter                 \
-        'git fat index-filter /tmp/fat-filter-files' \
+        'git fat index-filter /tmp/fat-filter-files --manage-gitattributes' \
         --tag-name-filter cat -- --all
 
+(You can remove the `--manage-gitattributes` option if you don't want to
+append all the files being enrolled in `git fat` to `.gitattributes`,
+however, future users would need to use `.git/info/attributes` to have
+the `git fat` fileters run.)
 When this finishes, inspect to see if everything is in order and follow
 the
 [Checklist for Shrinking a Repository](http://www.kernel.org/pub/software/scm/git/docs/git-filter-branch.html#_checklist_for_shrinking_a_repository)
 in the `git filter-branch` man page, typically `git clone
 file:///path/to/repo`. Be sure to `git fat push` from the original
 repository.
+
+See the script `test-retroactive.sh` for an example of cleaning.
 
 ## Implementation notes
 The actual binary files are stored in `.git/fat/objects`, leaving `.git/objects` nice and small.
