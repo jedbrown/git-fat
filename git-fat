@@ -399,6 +399,7 @@ class GitFat(object):
         revlist.wait()
         difftree.wait()
     def cmd_index_filter(self, args):
+        manage_gitattributes = '--manage-gitattributes' in args
         filelist = set(f.strip() for f in open(args[0]).readlines())
         lsfiles = subprocess.Popen(['git', 'ls-files', '-s'], stdout=subprocess.PIPE)
         updateindex = subprocess.Popen(['git', 'update-index', '--index-info'], stdin=subprocess.PIPE)
@@ -428,6 +429,17 @@ class GitFat(object):
                 mkdir_p(os.path.dirname(hashfile))
                 open(hashfile, 'w').write(cleanedobj + '\n')
             updateindex.stdin.write('%s %s %s\t%s\n' % (mode, cleanedobj, stageno, filename))
+        if manage_gitattributes:
+            try:
+                mode, blobsha1, stageno, filename = subprocess.check_output(['git', 'ls-files', '-s', '.gitattributes']).split()
+                gitattributes_lines = subprocess.check_output(['git', 'cat-file', 'blob', blobsha1]).splitlines()
+            except ValueError:  # Nothing to unpack, thus no file
+                mode, stageno = '100644', '0'
+                gitattributes_lines = []
+            gitattributes_extra = ['%s filter=fat -text' % line.split()[0] for line in filelist]
+            hashobject = subprocess.Popen(['git', 'hash-object', '-w', '--stdin'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            stdout, stderr = hashobject.communicate('\n'.join(gitattributes_lines + gitattributes_extra) + '\n')
+            updateindex.stdin.write('%s %s %s\t%s\n' % (mode, stdout.strip(), stageno, '.gitattributes'))
         updateindex.stdin.close()
         lsfiles.wait()
         updateindex.wait()
