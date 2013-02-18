@@ -124,7 +124,10 @@ class GitFat(object):
             rshopts += ' -p ' + ssh_port
         if rshopts:
             cmd.append('--rsh=ssh' + rshopts)
-        cmd += [self.objdir + '/', remote + '/']
+        if push:
+            cmd += [self.objdir + '/', remote + '/']
+        else:
+            cmd += [remote + '/', self.objdir + '/']
         return cmd
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
@@ -295,6 +298,7 @@ class GitFat(object):
         pushall = '--all' in args
         files = self.referenced_objects(all=pushall) & self.catalog_objects()
         cmd = self.get_rsync_command(push=True)
+        self.verbose('Executing: %s' % ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input='\x00'.join(files))
     def checkout(self, show_orphans=False):
@@ -328,6 +332,7 @@ class GitFat(object):
                 refargs['rev'] = rev
         files = self.referenced_objects(**refargs) - self.catalog_objects()
         cmd = self.get_rsync_command(push=False)
+        self.verbose('Executing: %s' % ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input='\x00'.join(files))
         self.checkout()

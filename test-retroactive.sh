@@ -32,3 +32,19 @@ git checkout HEAD^
 rm *
 git checkout .
 ls -al
+
+# Set up place to push
+git checkout master
+cat > .gitfat <<EOF
+[rsync]
+remote = $(realpath ../retro-store)
+EOF
+git add .gitfat
+git commit -m'Add .gitfat for local push'
+git fat push
+
+cd ..
+git clone file:///$(realpath retro) retro-clone
+cd retro-clone
+git fat init
+git fat pull
