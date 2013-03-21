@@ -90,13 +90,13 @@ class GitFat(object):
         self.verbose = verbose_stderr if os.environ.get('GIT_FAT_VERBOSE') else verbose_ignore
         self.gitroot = subprocess.check_output('git rev-parse --show-toplevel'.split()).strip()
         self.gitdir = subprocess.check_output('git rev-parse --git-dir'.split()).strip()
-        self.objdir = os.path.join(self.gitdir, 'fat', 'objects')
+        self.objdir = os.path.join(self.gitdir.decode('utf-8'), "fat", "objects")
         if os.environ.get('GIT_FAT_VERSION') == '1':
             self.encode = self.encode_v1
         else:
             self.encode = self.encode_v2
         def magiclen(enc):
-            return len(enc(hashlib.sha1('dummy').hexdigest(), 5))
+            return len(enc(hashlib.sha1("dummy".encode('utf-8')).hexdigest(), 5))
         self.magiclen = magiclen(self.encode) # Current version
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
     def setup(self):
@@ -193,7 +193,7 @@ class GitFat(object):
                             ishanging = True              # Working tree version is verbatim from repository (not smudged)
                             outstream = outstreamclean
                         firstblock = False
-                    h.update(block)
+                    h.update(block.encode('utf-8'))
                     bytes += len(block)
                     outstream.write(block)
                 outstream.flush()
