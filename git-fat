@@ -399,7 +399,7 @@ class GitFat(object):
         time1 = time.time()
         self.verbose('Found %d paths in %.3f s' % (len(pathsizes), time1-time0))
         maxlen = max(map(len,pathsizes)) if pathsizes else 0
-        for path, sizes in sorted(pathsizes.items(), cmp=lambda (p1,s1),(p2,s2): cmp(max(s1),max(s2)), reverse=True):
+        for path, sizes in sorted(pathsizes.items(), key=lambda item: max(item[1]), reverse=True):
             print('%-*s filter=fat -text # %10d %d' % (maxlen, path,max(sizes),len(sizes)))
         revlist.wait()
         difftree.wait()
