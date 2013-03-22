@@ -96,8 +96,7 @@ class GitFat(object):
         else:
             self.encode = self.encode_v2
         def magiclen(enc):
-            # It looks like in Python 3.3, the len command does not include the '\n' character on strings
-            return len(enc(hashlib.sha1(b'dummy').hexdigest(), 5))+1
+            return len(enc(hashlib.sha1(b'dummy').hexdigest(), 5))
         self.magiclen = magiclen(self.encode) # Current version
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
     def setup(self):
@@ -144,7 +143,7 @@ class GitFat(object):
             parts = string[len(cookie):].split()
             digest = parts[0]
             bytes = int(parts[1]) if len(parts) > 1 else None
-            return digest, bytes
+            return digest.decode('utf-8'), int(bytes)
         elif noraise:
             return None, None
         else:
@@ -153,7 +152,7 @@ class GitFat(object):
         'Return digest if git-fat cache, otherwise return iterator over entire file contents'
         preamble = stream.read(self.magiclen)
         try:
-            return self.decode(preamble)
+            return self.decode(preamble.encode('utf-8'))
         except GitFat.DecodeError:
             # Not sure if this is the right behavior
             return itertools.chain([preamble], readblocks(stream)), None
@@ -208,7 +207,7 @@ class GitFat(object):
                     os.rename(tmpname, objfile)
                     self.verbose('git-fat filter-clean: caching to %s' % objfile)
                 cached = True
-                outstreamclean.write(self.encode(digest, bytes))
+                outstreamclean.write(self.encode(digest, bytes).encode('utf-8'))
         finally:
             if not cached:
                 os.remove(tmpname)
@@ -221,19 +220,22 @@ class GitFat(object):
         self.setup()
         # Set stdin to binary mode
         sys.stdin = sys.stdin.detach()
+        sys.stdout = sys.stdout.detach()
         self.filter_clean(sys.stdin, sys.stdout)
 
     def cmd_filter_smudge(self):
         self.setup()
+        # Make stdout binary
+        sys.stdout = sys.stdout.detach()
         result, bytes = self.decode_stream(sys.stdin)
         if isinstance(result, str):       # We got a digest
             objfile = os.path.join(self.objdir, result)
             try:
-                cat(open(objfile), sys.stdout)
                 self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
+                cat(open(objfile, 'rb'), sys.stdout)
             except IOError:                # file not found
                 self.verbose('git-fat filter-smudge: fat object missing %s' % objfile)
-                sys.stdout.write(self.encode(result, bytes))   # could leave a better notice about how to recover this file
+                sys.stdout.write(self.encode(result.encode('utf-8'), bytes))   # could leave a better notice about how to recover this file
         else:                              # We have an iterable over the original input.
             self.verbose('git-fat filter-smudge: not a managed file')
             cat_iter(result, sys.stdout)
@@ -258,7 +260,7 @@ class GitFat(object):
             if objtype == 'blob' and int(size) in self.magiclens:
                 try:
                     fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
-                    referenced.add(fathash.decode('utf-8'))
+                    referenced.add(fathash)
                 except GitFat.DecodeError:
                     pass
         cut_thread.join()
@@ -269,6 +271,7 @@ class GitFat(object):
         'generator for all orphan placeholders in the working tree'
         for fname in subprocess.check_output(['git', 'ls-files']).splitlines():
             digest = self.decode_file(fname)[0]
+            fname = fname.decode('utf-8')
             if digest:
                 yield (digest, fname)
     def cmd_status(self, args):
