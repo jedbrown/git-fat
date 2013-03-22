@@ -336,7 +336,7 @@ class GitFat(object):
         cmd = self.get_rsync_command(push=False)
         self.verbose('Executing: %s' % ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input=b'\x00'.join(files))
+        p.communicate(input='\x00'.join(files).encode('utf-8'))
         self.checkout()
     def cmd_checkout(self, args):
         self.checkout(show_orphans=True)
