@@ -183,7 +183,7 @@ class GitFat(object):
         try:
             ishanging = False
             cached = False                # changes to True when file is cached
-            with os.fdopen(fd, 'w') as cache:
+            with os.fdopen(fd, 'wb') as cache:
                 outstream = cache
                 blockiter = readblocks(instream)
                 firstblock = True
@@ -193,7 +193,7 @@ class GitFat(object):
                             ishanging = True              # Working tree version is verbatim from repository (not smudged)
                             outstream = outstreamclean
                         firstblock = False
-                    h.update(block.encode('utf-8'))
+                    h.update(block)
                     bytes += len(block)
                     outstream.write(block)
                 outstream.flush()
@@ -218,6 +218,8 @@ class GitFat(object):
         version of the file on stdin and produces the "clean" (repository) version on stdout.
         '''
         self.setup()
+        # Set stdin to binary mode
+        sys.stdin = sys.stdin.detach()
         self.filter_clean(sys.stdin, sys.stdout)
 
     def cmd_filter_smudge(self):
