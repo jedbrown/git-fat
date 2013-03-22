@@ -96,7 +96,8 @@ class GitFat(object):
         else:
             self.encode = self.encode_v2
         def magiclen(enc):
-            return len(enc(hashlib.sha1(b'dummy').hexdigest(), 5))
+            # It looks like in Python 3.3, the len command does not include the '\n' character on strings
+            return len(enc(hashlib.sha1(b'dummy').hexdigest(), 5))+1
         self.magiclen = magiclen(self.encode) # Current version
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
     def setup(self):
@@ -254,7 +255,7 @@ class GitFat(object):
         cut_thread.start()
         for line in p2.stdout:
             objhash, objtype, size = line.decode('utf-8').split()
-            if objtype == 'blob': # FIXME and int(size) in self.magiclens:
+            if objtype == 'blob' and int(size) in self.magiclens:
                 try:
                     fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
                     referenced.add(fathash.decode('utf-8'))
