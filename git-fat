@@ -138,7 +138,7 @@ class GitFat(object):
         'Produce representation of file to be stored in repository. 20 characters can hold 64-bit integers.'
         return '#$# git-fat %s %20d\n' % (digest, bytes)
     def decode(self, string, noraise=False):
-        cookie = '#$# git-fat '
+        cookie = b'#$# git-fat '
         if string.startswith(cookie):
             parts = string[len(cookie):].split()
             digest = parts[0]
@@ -230,10 +230,10 @@ class GitFat(object):
             try:
                 cat(open(objfile), sys.stdout)
                 self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
-            except IOError:                 # file not found
+            except IOError:                # file not found
                 self.verbose('git-fat filter-smudge: fat object missing %s' % objfile)
                 sys.stdout.write(self.encode(result, bytes))   # could leave a better notice about how to recover this file
-        else:                             # We have an iterable over the original input.
+        else:                              # We have an iterable over the original input.
             self.verbose('git-fat filter-smudge: not a managed file')
             cat_iter(result, sys.stdout)
     def catalog_objects(self):
@@ -253,11 +253,11 @@ class GitFat(object):
         cut_thread = threading.Thread(target=cut_sha1hash, args=(p1.stdout, p2.stdin))
         cut_thread.start()
         for line in p2.stdout:
-            objhash, objtype, size = line.split()
-            if objtype == 'blob' and int(size) in self.magiclens:
+            objhash, objtype, size = line.decode('utf-8').split()
+            if objtype == 'blob': # FIXME and int(size) in self.magiclens:
                 try:
                     fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
-                    referenced.add(fathash)
+                    referenced.add(fathash.decode('utf-8'))
                 except GitFat.DecodeError:
                     pass
         cut_thread.join()
@@ -302,7 +302,7 @@ class GitFat(object):
         cmd = self.get_rsync_command(push=True)
         self.verbose('Executing: %s' % ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input='\x00'.join(files))
+        p.communicate(input='\x00'.join(files).encode('utf-8'))
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
         for digest, fname in self.orphan_files():
@@ -336,7 +336,7 @@ class GitFat(object):
         cmd = self.get_rsync_command(push=False)
         self.verbose('Executing: %s' % ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input='\x00'.join(files))
+        p.communicate(input=b'\x00'.join(files))
         self.checkout()
     def cmd_checkout(self, args):
         self.checkout(show_orphans=True)
