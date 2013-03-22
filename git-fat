@@ -96,13 +96,13 @@ class GitFat(object):
         else:
             self.encode = self.encode_v2
         def magiclen(enc):
-            return len(enc(hashlib.sha1("dummy".encode('utf-8')).hexdigest(), 5))
+            return len(enc(hashlib.sha1(b'dummy').hexdigest(), 5))
         self.magiclen = magiclen(self.encode) # Current version
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
     def setup(self):
         mkdir_p(self.objdir)
     def get_rsync(self):
-        cfgpath   = os.path.join(self.gitroot,'.gitfat')
+        cfgpath   = os.path.join(self.gitroot.decode('utf-8'),'.gitfat')
         remote    = gitconfig_get('rsync.remote', file=cfgpath)
         ssh_port  = gitconfig_get('rsync.sshport', file=cfgpath)
         ssh_user  = gitconfig_get('rsync.sshuser', file=cfgpath)
@@ -125,9 +125,9 @@ class GitFat(object):
         if rshopts:
             cmd.append('--rsh=ssh' + rshopts)
         if push:
-            cmd += [self.objdir + '/', remote + '/']
+            cmd += [self.objdir + '/', remote.decode('utf-8') + '/']
         else:
-            cmd += [remote + '/', self.objdir + '/']
+            cmd += [remote.decode('utf-8') + '/', self.objdir + '/']
         return cmd
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
@@ -241,12 +241,12 @@ class GitFat(object):
         if all:
             rev = '--all'
         elif rev is None:
-            rev = self.revparse('HEAD')
+            rev = self.revparse('HEAD').decode('utf-8')
         p1 = subprocess.Popen(['git','rev-list','--objects',rev], stdout=subprocess.PIPE)
         p2 = subprocess.Popen(['git','cat-file','--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         def cut_sha1hash(input, output):
             for line in input:
-                output.write(line.split()[0] + '\n')
+                output.write(line.split()[0] + b'\n')
             output.close()
         cut_thread = threading.Thread(target=cut_sha1hash, args=(p1.stdout, p2.stdin))
         cut_thread.start()
@@ -399,7 +399,7 @@ class GitFat(object):
         time1 = time.time()
         self.verbose('Found %d paths in %.3f s' % (len(pathsizes), time1-time0))
         maxlen = max(map(len,pathsizes)) if pathsizes else 0
-        for path, sizes in sorted(pathsizes.items(), key=lambda item: item[1], reverse=True):
+        for path, sizes in sorted(pathsizes.items(), key=lambda item: max(item[1]), reverse=True):
             print('%-*s filter=fat -text # %10d %d' % (maxlen, path,max(sizes),len(sizes)))
         revlist.wait()
         difftree.wait()
