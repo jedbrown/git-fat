@@ -1,3 +1,6 @@
+# Modifications
+This is a modification of the original git-fat by jedbrown (https://github.com/jedbrown/git-fat). These changes are intended to allow git-fat to work under Python 3.3, which introduces all kinds of strict string encoding requirements.
+
 # Introduction
 Checking large binary files into a source repository (Git or otherwise) is a bad idea because repository size quickly becomes unreasonable.
 Even if the instantaneous working tree stays manageable, preserving repository integrity requires all binary files in the entire project history, which given the typically poor compression of binary diffs, implies that the repository size will become impractically large.
