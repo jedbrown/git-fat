@@ -384,6 +384,7 @@ class GitFat(object):
         time1 = time.time()
         self.verbose('%d of %d blobs are >= %d bytes [elapsed %.3fs]' % (numlarge, numblobs, threshsize, time1-time0))
     def cmd_find(self, args):
+        # FIXME: Need input validation here
         maxsize = int(args[0])
         blobsizes = dict(self.gen_large_blobs('--all', maxsize))
         time0 = time.time()
@@ -404,11 +405,13 @@ class GitFat(object):
         revlist.wait()
         difftree.wait()
     def cmd_index_filter(self, args):
+        # FIXME: Need input validation here
         manage_gitattributes = '--manage-gitattributes' in args
         filelist = set(f.strip() for f in open(args[0]).readlines())
         lsfiles = subprocess.Popen(['git', 'ls-files', '-s'], stdout=subprocess.PIPE)
         updateindex = subprocess.Popen(['git', 'update-index', '--index-info'], stdin=subprocess.PIPE)
         for line in lsfiles.stdout:
+            line = line.decode('utf8')
             mode, sep, tail = line.partition(' ')
             blobhash, sep, tail = tail.partition(' ')
             stageno, sep, tail = tail.partition('\t')
