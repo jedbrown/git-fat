@@ -18,7 +18,14 @@ import collections
 BLOCK_SIZE = 4096
 
 def verbose_stderr(*args, **kwargs):
-    return print(*args, file=sys.stderr, **kwargs)
+    def decodebytes(arg):
+        if isinstance(arg, bytes):
+            # The only non-ASCII characters we might have are file
+            # paths, so they'll be in the native file system encoding
+            return arg.decode(sys.getfilesystemencoding())
+        else:
+            return arg
+    return print(*map(decodebytes,args), file=sys.stderr, **kwargs)
 def verbose_ignore(*args, **kwargs):
     pass
 
@@ -124,9 +131,9 @@ class GitFat(object):
     def get_rsync_command(self,push):
         (remote, ssh_port, ssh_user) = self.get_rsync()
         if push:
-            self.verbose('Pushing to %s' % (remote))
+            self.verbose('Pushing to:', remote)
         else:
-            self.verbose('Pulling from %s' % (remote))
+            self.verbose('Pulling from:', remote)
 
         cmd = [b'rsync', b'--progress', b'--ignore-existing', b'--from0', b'--files-from=-']
         rshopts = b''
@@ -214,11 +221,11 @@ class GitFat(object):
             objfile = os.path.join(self.objdir, digest)
             if not ishanging:
                 if os.path.exists(objfile):
-                    self.verbose('git-fat filter-clean: cache already exists %s' % objfile)
+                    self.verbose('git-fat filter-clean: cache already exists:', objfile)
                     os.remove(tmpname)
                 else:
                     os.rename(tmpname, objfile)
-                    self.verbose('git-fat filter-clean: caching to %s' % objfile)
+                    self.verbose('git-fat filter-clean: caching to:', objfile)
                 cached = True
                 outstreamclean.write(self.encode(digest, bytecount))
         finally:
@@ -245,10 +252,10 @@ class GitFat(object):
         if isinstance(result, bytes): # We got a digest
             objfile = os.path.join(self.objdir, result)
             try:
-                self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
+                self.verbose('git-fat filter-smudge: restoring from:', objfile)
                 cat(open(objfile, 'rb'), sys.stdout)
             except IOError:                # file not found
-                self.verbose('git-fat filter-smudge: fat object missing %s' % objfile)
+                self.verbose('git-fat filter-smudge: fat object missing:', objfile)
                 sys.stdout.write(self.encode(result, bytecount))   # could leave a better notice about how to recover this file
         else:                              # We have an iterable over the original input.
             self.verbose('git-fat filter-smudge: not a managed file')
@@ -317,7 +324,7 @@ class GitFat(object):
         pushall = '--all' in args
         files = self.referenced_objects(all=pushall) & self.catalog_objects()
         cmd = self.get_rsync_command(push=True)
-        self.verbose('Executing: %s' % b' '.join(cmd))
+        self.verbose('Executing:', b' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input=b'\x00'.join(files))
     def checkout(self, show_orphans=False):
@@ -325,7 +332,7 @@ class GitFat(object):
         for digest, fname in self.orphan_files():
             objpath = os.path.join(self.objdir, digest)
             if os.access(objpath, os.R_OK):
-                print('Restoring %s -> %s' % (digest, fname))
+                print((b'Restoring ' + digest + b' -> ' + fname).decode(sys.getfilesystemencoding()))
                 # The output of our smudge filter depends on the existence of
                 # the file in .git/fat/objects, but git caches the file stat
                 # from the previous time the file was smudged, therefore it
@@ -351,7 +358,7 @@ class GitFat(object):
                 refargs['rev'] = rev
         files = self.referenced_objects(**refargs) - self.catalog_objects()
         cmd = self.get_rsync_command(push=False)
-        self.verbose('Executing: %s' % b' '.join(cmd))
+        self.verbose('Executing:', b' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input=(b'\x00'.join(files)))
         self.checkout()
