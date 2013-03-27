@@ -68,14 +68,14 @@ def difftreez_reader(input):
     :oldmode newmode oldsha1 newsha1 modflag\0filename\0:oldmode newmode ...
     """
     buffer = []
-    partial = ''
+    partial = b''
     while True:
         newread = input.read(BLOCK_SIZE)
         if not newread:
             break
         partial += newread
         while True:
-            head, sep, partial = partial.partition('\0')
+            head, sep, partial = partial.partition(b'\0')
             if not sep:
                 partial = head
                 break
@@ -387,7 +387,7 @@ class GitFat(object):
             This truncates to one hash per line.
             """
             for line in input:
-                output.write(line[:40] + '\n')
+                output.write(line[:40] + b'\n')
             output.close()
         revlist = subprocess.Popen(['git', 'rev-list', '--all', '--objects'], stdout=subprocess.PIPE, bufsize=-1)
         objcheck = subprocess.Popen(['git', 'cat-file', '--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=-1)
@@ -397,7 +397,7 @@ class GitFat(object):
         # Build dict with the sizes of all large blobs
         for line in objcheck.stdout:
             objhash, blob, size = line.split()
-            if blob != 'blob':
+            if blob != b'blob':
                 continue
             size = int(size)
             numblobs += 1
@@ -421,6 +421,7 @@ class GitFat(object):
                                     stdin=revlist.stdout, stdout=subprocess.PIPE)
         for newblob, modflag, path in difftreez_reader(difftree.stdout):
             bsize = blobsizes.get(newblob)
+            path = path.decode(sys.getfilesystemencoding())
             if bsize:                     # We care about this blob
                 pathsizes[path].add(bsize)
         time1 = time.time()
@@ -433,7 +434,7 @@ class GitFat(object):
     def cmd_index_filter(self, args):
         # FIXME: Need input validation here
         manage_gitattributes = '--manage-gitattributes' in args
-        filelist = set(f.strip() for f in open(args[0]).readlines())
+        filelist = set(f.strip() for f in open(args[0], 'rb').readlines())
         lsfiles = subprocess.Popen(['git', 'ls-files', '-s'], stdout=subprocess.PIPE)
         updateindex = subprocess.Popen(['git', 'update-index', '--index-info'], stdin=subprocess.PIPE)
         for line in lsfiles.stdout:
@@ -446,7 +447,7 @@ class GitFat(object):
             # This file will contain the hash of the cleaned object
             hashfile = os.path.join(self.gitdir, b'fat', b'index-filter', blobhash)
             try:
-                cleanedobj = open(hashfile).read().rstrip()
+                cleanedobj = open(hashfile, 'wb').read().rstrip()
             except IOError:
                 catfile = subprocess.Popen(['git', 'cat-file', 'blob', blobhash], stdout=subprocess.PIPE)
                 hashobject = subprocess.Popen(['git', 'hash-object', '-w', '--stdin'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -460,19 +461,19 @@ class GitFat(object):
                 hashobject.wait()
                 filterclean.join()
                 mkdir_p(os.path.dirname(hashfile))
-                open(hashfile, 'w').write(cleanedobj + '\n')
-            updateindex.stdin.write('%s %s %s\t%s\n' % (mode, cleanedobj, stageno, filename))
+                open(hashfile, 'wb').write(cleanedobj + b'\n')
+            updateindex.stdin.write(mode + b' ' + cleanedobj + b' ' + stageno + b'\t' + filename + b'\n')
         if manage_gitattributes:
             try:
                 mode, blobsha1, stageno, filename = subprocess.check_output(['git', 'ls-files', '-s', '.gitattributes']).split()
                 gitattributes_lines = subprocess.check_output(['git', 'cat-file', 'blob', blobsha1]).splitlines()
             except ValueError:  # Nothing to unpack, thus no file
-                mode, stageno = '100644', '0'
+                mode, stageno = b'100644', b'0'
                 gitattributes_lines = []
-            gitattributes_extra = ['%s filter=fat -text' % line.split()[0] for line in filelist]
+            gitattributes_extra = [line.split()[0] + b' filter=fat -text' for line in filelist]
             hashobject = subprocess.Popen(['git', 'hash-object', '-w', '--stdin'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-            stdout, stderr = hashobject.communicate('\n'.join(gitattributes_lines + gitattributes_extra) + '\n')
-            updateindex.stdin.write('%s %s %s\t%s\n' % (mode, stdout.strip(), stageno, '.gitattributes'))
+            stdout, stderr = hashobject.communicate(b'\n'.join(gitattributes_lines + gitattributes_extra) + b'\n')
+            updateindex.stdin.write(mode + b' ' + stdout.strip() + b' ' + stageno + b'\t.gitattributes\n')
         updateindex.stdin.close()
         lsfiles.wait()
         updateindex.wait()
