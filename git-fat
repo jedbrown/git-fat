@@ -436,7 +436,7 @@ class GitFat(object):
         filelist = set(f.strip() for f in open(args[0]).readlines())
         lsfiles = subprocess.Popen(['git', 'ls-files', '-s'], stdout=subprocess.PIPE)
         updateindex = subprocess.Popen(['git', 'update-index', '--index-info'], stdin=subprocess.PIPE)
-        for line in lsfiles.stdout.read():
+        for line in lsfiles.stdout:
             mode, sep, tail = line.partition(b' ')
             blobhash, sep, tail = tail.partition(b' ')
             stageno, sep, tail = tail.partition(b'\t')
