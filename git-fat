@@ -47,6 +47,17 @@ def verbose_stderr(*args, **kwargs):
 def verbose_ignore(*args, **kwargs):
     pass
 
+def ensure_binary_mode(stream):
+    try:       # Attempt the Python-3 way, also needed to handle unicode
+        return stream.detach()
+    except:
+        pass
+    if sys.platform == "win32":
+        # Fall back to Python-2 way, only needed on Windows
+        import msvcrt
+        msvcrt.setmode(stream.fileno(), os.O_BINARY)
+    return stream
+
 def mkdir_p(path):
     import errno
     try:
@@ -198,7 +209,7 @@ class GitFat(object):
             return False, None
         # read file
         try:
-            digest, bytes = self.decode_stream(open(fname))
+            digest, bytes = self.decode_stream(open(fname, 'rb'))
         except IOError:
             return False, None
         if isinstance(digest, str):
@@ -258,10 +269,16 @@ class GitFat(object):
         version of the file on stdin and produces the "clean" (repository) version on stdout.
         '''
         self.setup()
+        # Set stdin and stdout to binary mode
+        sys.stdin = ensure_binary_mode(sys.stdin)
+        sys.stdout = ensure_binary_mode(sys.stdout)
         self.filter_clean(sys.stdin, sys.stdout)
 
     def cmd_filter_smudge(self):
         self.setup()
+        # Ensure streams are treated as binary
+        sys.stdin = ensure_binary_mode(sys.stdin)
+        sys.stdout = ensure_binary_mode(sys.stdout)
         result, bytes = self.decode_stream(sys.stdin)
         if isinstance(result, str):       # We got a digest
             objfile = os.path.join(self.objdir, result)
