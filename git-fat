@@ -171,7 +171,7 @@ class GitFat(object):
         'Return digest if git-fat cache, otherwise return iterator over entire file contents'
         preamble = stream.read(self.magiclen)
         try:
-            return self.decode(preamble.encode('utf-8'))
+            return self.decode(preamble)
         except GitFat.DecodeError:
             # Not sure if this is the right behavior
             return itertools.chain([preamble], readblocks(stream)), None
@@ -292,7 +292,6 @@ class GitFat(object):
         'generator for all orphan placeholders in the working tree'
         for fname in subprocess.check_output(['git', 'ls-files']).splitlines():
             digest = self.decode_file(fname)[0]
-            fname = fname.decode('utf-8')
             if digest:
                 yield (digest, fname)
     def cmd_status(self, args):
