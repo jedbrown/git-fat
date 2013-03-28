@@ -121,7 +121,7 @@ class GitFat(object):
     def setup(self):
         mkdir_p(self.objdir)
     def get_rsync(self):
-        cfgpath   = os.path.join(self.gitroot, b'.gitfat')
+        cfgpath   = os.path.join(self.gitroot, b'.gitfat').decode('ASCII')
         remote    = gitconfig_get('rsync.remote', file=cfgpath)
         ssh_port  = gitconfig_get('rsync.sshport', file=cfgpath)
         ssh_user  = gitconfig_get('rsync.sshuser', file=cfgpath)
@@ -135,18 +135,18 @@ class GitFat(object):
         else:
             self.verbose('Pulling from:', remote)
 
-        cmd = [b'rsync', b'--progress', b'--ignore-existing', b'--from0', b'--files-from=-']
-        rshopts = b''
+        cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-']
+        rshopts = ''
         if ssh_user:
-            rshopts += b' -l ' + ssh_user
+            rshopts += ' -l ' + ssh_user
         if ssh_port:
-            rshopts += b' -p ' + ssh_port
+            rshopts += ' -p ' + ssh_port
         if rshopts:
-            cmd.append(b'--rsh=ssh' + rshopts)
+            cmd.append('--rsh=ssh' + rshopts)
         if push:
-            cmd += [self.objdir + b'/', remote + b'/']
+            cmd += [self.objdir.decode('ASCII') + '/', remote.decode('ASCII') + '/']
         else:
-            cmd += [remote + b'/', self.objdir + b'/']
+            cmd += [remote.decode('ASCII') + '/', self.objdir.decode('ASCII') + '/']
         return cmd
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
@@ -224,7 +224,7 @@ class GitFat(object):
                     self.verbose('git-fat filter-clean: cache already exists:', objfile)
                     os.remove(tmpname)
                 else:
-                    os.rename(tmpname, objfile)
+                    os.rename(tmpname, objfile.decode('ASCII'))
                     self.verbose('git-fat filter-clean: caching to:', objfile)
                 cached = True
                 outstreamclean.write(self.encode(digest, bytecount))
@@ -268,7 +268,7 @@ class GitFat(object):
             rev = '--all'
         elif rev is None:
             rev = self.revparse('HEAD')
-        p1 = subprocess.Popen(['git','rev-list','--objects',rev], stdout=subprocess.PIPE)
+        p1 = subprocess.Popen(['git','rev-list','--objects',rev.decode('ASCII')], stdout=subprocess.PIPE)
         p2 = subprocess.Popen(['git','cat-file','--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         def cut_sha1hash(input, output):
             for line in input:
@@ -280,7 +280,7 @@ class GitFat(object):
             objhash, objtype, size = line.split()
             if objtype == b'blob' and int(size) in self.magiclens:
                 try:
-                    fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
+                    fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash.decode('ASCII')]))[0]
                     referenced.add(fathash)
                 except GitFat.DecodeError:
                     pass
@@ -313,7 +313,7 @@ class GitFat(object):
         if garbage:
             print('Garbage objects:')
             for g in garbage:
-                print('    ' + g)
+                print('    ' + g.decode('ASCII'))
     def is_dirty(self):
         return subprocess.call(['git', 'diff-index', '--quiet', 'HEAD']) == 0
     def cmd_push(self, args):
@@ -324,7 +324,7 @@ class GitFat(object):
         pushall = '--all' in args
         files = self.referenced_objects(all=pushall) & self.catalog_objects()
         cmd = self.get_rsync_command(push=True)
-        self.verbose('Executing:', b' '.join(cmd))
+        self.verbose('Executing:', ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input=b'\x00'.join(files))
     def checkout(self, show_orphans=False):
@@ -341,7 +341,7 @@ class GitFat(object):
                 # also does the trick.
                 os.utime(fname, None)
                 # This re-smudge is essentially a copy that restores permissions.
-                subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname])
+                subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname.decode('ASCII')])
             elif show_orphans:
                 print('Data unavailable: %s %s' % (digest,fname))
     def cmd_pull(self, args):
@@ -358,7 +358,7 @@ class GitFat(object):
                 refargs['rev'] = rev
         files = self.referenced_objects(**refargs) - self.catalog_objects()
         cmd = self.get_rsync_command(push=False)
-        self.verbose('Executing:', b' '.join(cmd))
+        self.verbose('Executing:', ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input=(b'\x00'.join(files)))
         self.checkout()
