@@ -224,7 +224,7 @@ class GitFat(object):
                     self.verbose('git-fat filter-clean: cache already exists:', objfile)
                     os.remove(tmpname)
                 else:
-                    os.rename(tmpname, objfile.decode(sys.getfilesystemencoding()))
+                    os.rename(tmpname.encode(sys.getfilesystemencoding()), objfile)
                     self.verbose('git-fat filter-clean: caching to:', objfile)
                 cached = True
                 outstreamclean.write(self.encode(digest, bytecount))
