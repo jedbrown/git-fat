@@ -115,13 +115,13 @@ class GitFat(object):
         else:
             self.encode = self.encode_v2
         def magiclen(enc):
-            return len(enc(hashlib.sha1(b'dummy').hexdigest().encode('ASCII'), 5))
+            return len(enc(hashlib.sha1(b'dummy').hexdigest().encode(sys.getfilesystemencoding()), 5))
         self.magiclen = magiclen(self.encode) # Current version
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
     def setup(self):
         mkdir_p(self.objdir)
     def get_rsync(self):
-        cfgpath   = os.path.join(self.gitroot, b'.gitfat').decode('ASCII')
+        cfgpath   = os.path.join(self.gitroot, b'.gitfat').decode(sys.getfilesystemencoding())
         remote    = gitconfig_get('rsync.remote', file=cfgpath)
         ssh_port  = gitconfig_get('rsync.sshport', file=cfgpath)
         ssh_user  = gitconfig_get('rsync.sshuser', file=cfgpath)
@@ -144,9 +144,9 @@ class GitFat(object):
         if rshopts:
             cmd.append('--rsh=ssh' + rshopts)
         if push:
-            cmd += [self.objdir.decode('ASCII') + '/', remote.decode('ASCII') + '/']
+            cmd += [self.objdir.decode(sys.getfilesystemencoding()) + '/', remote.decode('utf-8') + '/']
         else:
-            cmd += [remote.decode('ASCII') + '/', self.objdir.decode('ASCII') + '/']
+            cmd += [remote.decode('utf-8') + '/', self.objdir.decode(sys.getfilesystemencoding()) + '/']
         return cmd
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
@@ -224,7 +224,7 @@ class GitFat(object):
                     self.verbose('git-fat filter-clean: cache already exists:', objfile)
                     os.remove(tmpname)
                 else:
-                    os.rename(tmpname, objfile.decode('ASCII'))
+                    os.rename(tmpname, objfile.decode(sys.getfilesystemencoding()))
                     self.verbose('git-fat filter-clean: caching to:', objfile)
                 cached = True
                 outstreamclean.write(self.encode(digest, bytecount))
@@ -268,7 +268,7 @@ class GitFat(object):
             rev = '--all'
         elif rev is None:
             rev = self.revparse('HEAD')
-        p1 = subprocess.Popen(['git','rev-list','--objects',rev.decode('ASCII')], stdout=subprocess.PIPE)
+        p1 = subprocess.Popen(['git','rev-list','--objects',rev.decode('utf-8')], stdout=subprocess.PIPE)
         p2 = subprocess.Popen(['git','cat-file','--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         def cut_sha1hash(input, output):
             for line in input:
@@ -280,7 +280,7 @@ class GitFat(object):
             objhash, objtype, size = line.split()
             if objtype == b'blob' and int(size) in self.magiclens:
                 try:
-                    fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash.decode('ASCII')]))[0]
+                    fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash.decode(sys.getfilesystemencoding())]))[0]
                     referenced.add(fathash)
                 except GitFat.DecodeError:
                     pass
@@ -313,7 +313,7 @@ class GitFat(object):
         if garbage:
             print('Garbage objects:')
             for g in garbage:
-                print('    ' + g.decode('ASCII'))
+                print('    ' + g.decode(sys.getfilesystemencoding()))
     def is_dirty(self):
         return subprocess.call(['git', 'diff-index', '--quiet', 'HEAD']) == 0
     def cmd_push(self, args):
@@ -341,7 +341,7 @@ class GitFat(object):
                 # also does the trick.
                 os.utime(fname, None)
                 # This re-smudge is essentially a copy that restores permissions.
-                subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname.decode('ASCII')])
+                subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname.decode(sys.getfilesystemencoding())])
             elif show_orphans:
                 print('Data unavailable: %s %s' % (digest,fname))
     def cmd_pull(self, args):

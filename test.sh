@@ -54,3 +54,19 @@ git clone fat-test fat-test2
 cd fat-test2
 git fat init
 git fat pull
+
+# Remove a file from the initial repo
+cd ../fat-test
+git rm a.fat
+git commit -m"remvoe a.fat"
+git fat push
+
+# Verify removal in second repo
+cd ../fat-test2
+git pull
+git fat pull
+if [ -e "a.fat" ]
+then
+	echo "ERROR: Failed to remove a.fat"
+fi
+git fat gc
