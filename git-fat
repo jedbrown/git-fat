@@ -158,7 +158,7 @@ class GitFat(object):
             return itertools.chain([preamble], readblocks(stream)), None
     def decode_file(self, fname):
         # Fast check
-        stat = os.stat(fname)
+        stat = os.lstat(fname)
         if stat.st_size != self.magiclen:
             return False, None
         # read file
