@@ -21,3 +21,11 @@ git add b.fat
 git commit -m'add b.fat'
 echo 'revise fat content a' > a.fat
 git commit -am'revise a.fat'
+git fat push
+
+cd ..
+git clone fat-test fat-test2
+cd fat-test2
+git fat init
+git fat pull -- 'a.fa*'
+cat a.fat
