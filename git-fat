@@ -265,7 +265,7 @@ class GitFat(object):
 
     def orphan_files(self, patterns=[]):
         'generator for all orphan placeholders in the working tree'
-        for fname in subprocess.check_output(['git', 'ls-files'] + patterns).splitlines():
+        for fname in subprocess.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
             digest = self.decode_file(fname)[0]
             if digest:
                 yield (digest, fname)
