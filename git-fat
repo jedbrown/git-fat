@@ -30,6 +30,12 @@ def mkdir_p(path):
             pass
         else: raise
 
+def umask():
+    """Get umask without changing it."""
+    old = os.umask(0)
+    os.umask(old)
+    return old
+
 def readblocks(stream):
     bytes = 0
     while True:
@@ -204,6 +210,8 @@ class GitFat(object):
                     self.verbose('git-fat filter-clean: cache already exists %s' % objfile)
                     os.remove(tmpname)
                 else:
+                    # Set permissions for the new file using the current umask
+                    os.chmod(tmpname, int('444', 8) & ~umask())
                     os.rename(tmpname, objfile)
                     self.verbose('git-fat filter-clean: caching to %s' % objfile)
                 cached = True
