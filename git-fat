@@ -469,6 +469,9 @@ class GitFat(object):
             filename = tail.strip()
             if filename not in filelist:
                 continue
+            if mode == "120000":
+                # skip symbolic links
+                continue
             # This file will contain the hash of the cleaned object
             hashfile = os.path.join(self.gitdir, 'fat', 'index-filter', blobhash)
             try:
