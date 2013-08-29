@@ -194,7 +194,10 @@ class GitFat(object):
         if stat.st_size != self.magiclen:
             return False, None
         # read file
-        digest, bytes = self.decode_stream(open(fname))
+        try:
+            digest, bytes = self.decode_stream(open(fname))
+        except IOError:
+            return False, None
         if isinstance(digest, str):
             return digest, bytes
         else:
