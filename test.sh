@@ -13,6 +13,9 @@ echo '*.fat filter=fat -crlf' > .gitattributes
 git add .gitattributes .gitfat
 git commit -m'Initial fat repository'
 
+ln -s /oe/dss-oe/dss-add-ons-testing-build/deploy/licenses/common-licenses/GPL-3 c
+git add c
+git commit -m'add broken symlink'
 echo 'fat content a' > a.fat
 git add a.fat
 git commit -m'add a.fat'
