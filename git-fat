@@ -133,16 +133,19 @@ class GitFat(object):
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
     def setup(self):
         mkdir_p(self.objdir)
-    def get_rsync(self):
+    def get_rsync(self,push):
         cfgpath   = os.path.join(self.gitroot,'.gitfat')
         remote    = gitconfig_get('rsync.remote', file=cfgpath)
+        pushremote = gitconfig_get('rsync.pushremote', file=cfgpath)
         ssh_port  = gitconfig_get('rsync.sshport', file=cfgpath)
         ssh_user  = gitconfig_get('rsync.sshuser', file=cfgpath)
+        if push and pushremote is not None:
+            remote = pushremote
         if remote is None:
             raise RuntimeError('No rsync.remote in %s' % cfgpath)
         return remote, ssh_port, ssh_user
     def get_rsync_command(self,push):
-        (remote, ssh_port, ssh_user) = self.get_rsync()
+        (remote, ssh_port, ssh_user) = self.get_rsync(push=push)
         if push:
             self.verbose('Pushing to %s' % (remote))
         else:
