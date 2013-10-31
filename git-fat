@@ -7,9 +7,7 @@ import sys
 import hashlib
 import tempfile
 import os
-import subprocess
-import shlex
-import shutil
+import subprocess as sub
 import itertools
 import threading
 import time
@@ -18,49 +16,59 @@ import collections
 try:
     from subprocess import check_output
     del check_output
+
 except ImportError:
+
     def backport_check_output(*popenargs, **kwargs):
         r"""Run command with arguments and return its output as a byte string.
 
         Backported from Python 2.7 as it's implemented as pure python on stdlib.
 
-        >>> check_output(['/usr/bin/python', '--version'])
+        >> check_output(['/usr/bin/python', '--version'])
         Python 2.6.2
         """
-        process = subprocess.Popen(stdout=subprocess.PIPE, *popenargs, **kwargs)
+        process = sub.Popen(stdout=sub.PIPE, *popenargs, **kwargs)
         output, unused_err = process.communicate()
         retcode = process.poll()
         if retcode:
             cmd = kwargs.get("args")
             if cmd is None:
                 cmd = popenargs[0]
-            error = subprocess.CalledProcessError(retcode, cmd)
+            error = sub.CalledProcessError(retcode, cmd)
             error.output = output
             raise error
         return output
-    subprocess.check_output = backport_check_output
+
+    sub.check_output = backport_check_output
 
 BLOCK_SIZE = 4096
 
+
 def verbose_stderr(*args, **kwargs):
     return print(*args, file=sys.stderr, **kwargs)
+
+
 def verbose_ignore(*args, **kwargs):
     pass
+
 
 def mkdir_p(path):
     import errno
     try:
         os.makedirs(path)
-    except OSError as exc: # Python >2.5
+    except OSError as exc:  # Python >2.5
         if exc.errno == errno.EEXIST and os.path.isdir(path):
             pass
-        else: raise
+        else:
+            raise
+
 
 def umask():
     """Get umask without changing it."""
     old = os.umask(0)
     os.umask(old)
     return old
+
 
 def readblocks(stream):
     bytes = 0
@@ -70,11 +78,17 @@ def readblocks(stream):
         if not data:
             break
         yield data
+
+
 def cat_iter(initer, outstream):
     for block in initer:
         outstream.write(block)
+
+
 def cat(instream, outstream):
     return cat_iter(readblocks(instream), outstream)
+
+
 def difftreez_reader(input):
     """Incremental reader for git diff-tree -z output
 
@@ -98,50 +112,62 @@ def difftreez_reader(input):
                 path = buffer[1]
                 yield (newhash, modflag, path)
                 buffer = []
+
+
 def gitconfig_get(name, file=None):
     args = ['git', 'config', '--get']
     if file is not None:
         args += ['--file', file]
     args.append(name)
-    p = subprocess.Popen(args, stdout=subprocess.PIPE)
+    p = sub.Popen(args, stdout=sub.PIPE)
     output = p.communicate()[0].strip()
     if p.returncode != 0:
         return None
     else:
         return output
+
+
 def gitconfig_set(name, value, file=None):
     args = ['git', 'config']
     if file is not None:
         args += ['--file', file]
     args += [name, value]
-    p = subprocess.check_call(args)
+    sub.check_call(args)
+
 
 class GitFat(object):
     DecodeError = RuntimeError
+
     def __init__(self):
         self.verbose = verbose_stderr if os.environ.get('GIT_FAT_VERBOSE') else verbose_ignore
-        self.gitroot = subprocess.check_output('git rev-parse --show-toplevel'.split()).strip()
-        self.gitdir = subprocess.check_output('git rev-parse --git-dir'.split()).strip()
+        self.gitroot = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
+        self.gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
         self.objdir = os.path.join(self.gitdir, 'fat', 'objects')
+
         if os.environ.get('GIT_FAT_VERSION') == '1':
             self.encode = self.encode_v1
         else:
             self.encode = self.encode_v2
+
         def magiclen(enc):
             return len(enc(hashlib.sha1('dummy').hexdigest(), 5))
-        self.magiclen = magiclen(self.encode) # Current version
-        self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
+
+        self.magiclen = magiclen(self.encode)  # Current version
+        self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]]  # All prior versions
+
     def setup(self):
         mkdir_p(self.objdir)
+
     def get_rsync(self):
-        cfgpath   = os.path.join(self.gitroot,'.gitfat')
-        remote    = gitconfig_get('rsync.remote', file=cfgpath)
-        ssh_port  = gitconfig_get('rsync.sshport', file=cfgpath)
-        ssh_user  = gitconfig_get('rsync.sshuser', file=cfgpath)
+        cfgpath = os.path.join(self.gitroot, '.gitfat')
+        remote = gitconfig_get('rsync.remote', file=cfgpath)
+        ssh_port = gitconfig_get('rsync.sshport', file=cfgpath)
+        ssh_user = gitconfig_get('rsync.sshuser', file=cfgpath)
         if remote is None:
             raise RuntimeError('No rsync.remote in %s' % cfgpath)
         return remote, ssh_port, ssh_user
-    def get_rsync_command(self,push):
+
+    def get_rsync_command(self, push):
         (remote, ssh_port, ssh_user) = self.get_rsync()
         if push:
             self.verbose('Pushing to %s' % (remote))
@@ -161,14 +187,18 @@ class GitFat(object):
         else:
             cmd += [remote + '/', self.objdir + '/']
         return cmd
+
     def revparse(self, revname):
-        return subprocess.check_output(['git', 'rev-parse', revname]).strip()
+        return sub.check_output(['git', 'rev-parse', revname]).strip()
+
     def encode_v1(self, digest, bytes):
         'Produce legacy representation of file to be stored in repository.'
-        return '#$# git-fat %s\n' % (digest,)
+        return '#$# git-fat %s\n' % (digest, )
+
     def encode_v2(self, digest, bytes):
         'Produce representation of file to be stored in repository. 20 characters can hold 64-bit integers.'
         return '#$# git-fat %s %20d\n' % (digest, bytes)
+
     def decode(self, string, noraise=False):
         cookie = '#$# git-fat '
         if string.startswith(cookie):
@@ -180,6 +210,7 @@ class GitFat(object):
             return None, None
         else:
             raise GitFat.DecodeError('Could not decode %s' % (string))
+
     def decode_stream(self, stream):
         'Return digest if git-fat cache, otherwise return iterator over entire file contents'
         preamble = stream.read(self.magiclen)
@@ -188,6 +219,7 @@ class GitFat(object):
         except GitFat.DecodeError:
             # Not sure if this is the right behavior
             return itertools.chain([preamble], readblocks(stream)), None
+
     def decode_file(self, fname):
         # Fast check
         stat = os.lstat(fname)
@@ -202,6 +234,7 @@ class GitFat(object):
             return digest, bytes
         else:
             return None, bytes
+
     def decode_clean(self, body):
         '''
         Attempt to decode version in working tree. The tree version could be changed to have a more
@@ -211,6 +244,7 @@ class GitFat(object):
         '''
         digest, bytes = self.decode(body, noraise=True)
         return digest
+
     def filter_clean(self, instream, outstreamclean):
         h = hashlib.new('sha1')
         bytes = 0
@@ -220,12 +254,13 @@ class GitFat(object):
             cached = False                # changes to True when file is cached
             with os.fdopen(fd, 'w') as cache:
                 outstream = cache
-                blockiter = readblocks(instream)
+                # why is this here
+                blockiter = readblocks(instream)  # noqa
                 firstblock = True
                 for block in readblocks(instream):
                     if firstblock:
                         if len(block) == self.magiclen and self.decode_clean(block[0:self.magiclen]):
-                            ishanging = True              # Working tree version is verbatim from repository (not smudged)
+                            ishanging = True  # Working tree version is verbatim from repository (not smudged)
                             outstream = outstreamclean
                         firstblock = False
                     h.update(block)
@@ -267,20 +302,24 @@ class GitFat(object):
                 self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
             except IOError:                 # file not found
                 self.verbose('git-fat filter-smudge: fat object missing %s' % objfile)
-                sys.stdout.write(self.encode(result, bytes))   # could leave a better notice about how to recover this file
+                # could leave a better notice about how to recover this file
+                sys.stdout.write(self.encode(result, bytes))
         else:                             # We have an iterable over the original input.
             self.verbose('git-fat filter-smudge: not a managed file')
             cat_iter(result, sys.stdout)
+
     def catalog_objects(self):
         return set(os.listdir(self.objdir))
+
     def referenced_objects(self, rev=None, all=False):
         referenced = set()
         if all:
             rev = '--all'
         elif rev is None:
             rev = self.revparse('HEAD')
-        p1 = subprocess.Popen(['git','rev-list','--objects',rev], stdout=subprocess.PIPE)
-        p2 = subprocess.Popen(['git','cat-file','--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        p1 = sub.Popen(['git', 'rev-list', '--objects', rev], stdout=sub.PIPE)
+        p2 = sub.Popen(['git', 'cat-file', '--batch-check'], stdin=sub.PIPE, stdout=sub.PIPE)
+
         def cut_sha1hash(input, output):
             for line in input:
                 output.write(line.split()[0] + '\n')
@@ -291,7 +330,7 @@ class GitFat(object):
             objhash, objtype, size = line.split()
             if objtype == 'blob' and int(size) in self.magiclens:
                 try:
-                    fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
+                    fathash = self.decode(sub.check_output(['git', 'cat-file', '-p', objhash]))[0]
                     referenced.add(fathash)
                 except GitFat.DecodeError:
                     pass
@@ -302,7 +341,7 @@ class GitFat(object):
 
     def orphan_files(self, patterns=[]):
         'generator for all orphan placeholders in the working tree'
-        for fname in subprocess.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
+        for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
             digest = self.decode_file(fname)[0]
             if digest:
                 yield (digest, fname)
@@ -327,8 +366,10 @@ class GitFat(object):
             print('Garbage objects:')
             for g in garbage:
                 print('    ' + g)
+
     def is_dirty(self):
-        return subprocess.call(['git', 'diff-index', '--quiet', 'HEAD']) == 0
+        return sub.call(['git', 'diff-index', '--quiet', 'HEAD']) == 0
+
     def cmd_push(self, args):
         'Push anything that I have stored and referenced'
         self.setup()
@@ -338,8 +379,9 @@ class GitFat(object):
         files = self.referenced_objects(all=pushall) & self.catalog_objects()
         cmd = self.get_rsync_command(push=True)
         self.verbose('Executing: %s' % ' '.join(cmd))
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        p = sub.Popen(cmd, stdin=sub.PIPE)
         p.communicate(input='\x00'.join(files))
+
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
         for digest, fname in self.orphan_files():
@@ -354,9 +396,10 @@ class GitFat(object):
                 # also does the trick.
                 os.utime(fname, None)
                 # This re-smudge is essentially a copy that restores permissions.
-                subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname])
+                sub.check_call(['git', 'checkout-index', '--index', '--force', fname])
             elif show_orphans:
-                print('Data unavailable: %s %s' % (digest,fname))
+                print('Data unavailable: %s %s' % (digest, fname))
+
     def cmd_pull(self, args):
         'Pull anything that I have referenced, but not stored'
         self.setup()
@@ -372,7 +415,7 @@ class GitFat(object):
         files = self.filter_objects(refargs, self.parse_pull_patterns(args))
         cmd = self.get_rsync_command(push=False)
         self.verbose('Executing: %s' % ' '.join(cmd))
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        p = sub.Popen(cmd, stdin=sub.PIPE)
         p.communicate(input='\x00'.join(files))
         self.checkout()
 
@@ -381,7 +424,7 @@ class GitFat(object):
             return ['']
         else:
             idx = args.index('--')
-            patterns  = args[idx+1:] #we don't care about '--'
+            patterns = args[idx+1:]  # we don't care about '--'
             return patterns
 
     def filter_objects(self, refargs, patterns):
@@ -403,6 +446,7 @@ class GitFat(object):
             fname = os.path.join(self.objdir, obj)
             print('%10d %s' % (os.stat(fname).st_size, obj))
             os.remove(fname)
+
     def cmd_init(self):
         self.setup()
         if gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge'):
@@ -411,9 +455,11 @@ class GitFat(object):
             gitconfig_set('filter.fat.clean', 'git-fat filter-clean')
             gitconfig_set('filter.fat.smudge', 'git-fat filter-smudge')
             print('Initialized git fat')
+
     def gen_large_blobs(self, revs, threshsize):
         """Build dict of all blobs"""
         time0 = time.time()
+
         def hash_only(input, output):
             """The output of git rev-list --objects shows extra info for blobs, subdirectory trees, and tags.
             This truncates to one hash per line.
@@ -421,11 +467,15 @@ class GitFat(object):
             for line in input:
                 output.write(line[:40] + '\n')
             output.close()
-        revlist = subprocess.Popen(['git', 'rev-list', '--all', '--objects'], stdout=subprocess.PIPE, bufsize=-1)
-        objcheck = subprocess.Popen(['git', 'cat-file', '--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=-1)
+
+        revlist = sub.Popen(['git', 'rev-list', '--all', '--objects'], stdout=sub.PIPE, bufsize=-1)
+        objcheck = sub.Popen(
+            ['git', 'cat-file', '--batch-check'],
+            stdin=sub.PIPE, stdout=sub.PIPE, bufsize=-1
+            )
         hashonly = threading.Thread(target=hash_only, args=(revlist.stdout, objcheck.stdin))
         hashonly.start()
-        numblobs = 0; numlarge = 1
+        numblobs, numlarge = 0, 1
         # Build dict with the sizes of all large blobs
         for line in objcheck.stdout:
             objhash, blob, size = line.split()
@@ -441,31 +491,37 @@ class GitFat(object):
         hashonly.join()
         time1 = time.time()
         self.verbose('%d of %d blobs are >= %d bytes [elapsed %.3fs]' % (numlarge, numblobs, threshsize, time1-time0))
+
     def cmd_find(self, args):
         maxsize = int(args[0])
         blobsizes = dict(self.gen_large_blobs('--all', maxsize))
         time0 = time.time()
         # Find all names assumed by large blobs (those in blobsizes)
-        pathsizes = collections.defaultdict(lambda:set())
-        revlist = subprocess.Popen(['git', 'rev-list', '--all'], stdout=subprocess.PIPE, bufsize=-1)
-        difftree = subprocess.Popen(['git', 'diff-tree', '--root', '--no-renames', '--no-commit-id', '--diff-filter=AMCR', '-r', '--stdin', '-z'],
-                                    stdin=revlist.stdout, stdout=subprocess.PIPE)
+        pathsizes = collections.defaultdict(lambda: set())
+        revlist = sub.Popen(['git', 'rev-list', '--all'], stdout=sub.PIPE, bufsize=-1)
+        cmd = 'git diff-tree --root --no-renames --no-commit-id --diff-filter=AMCR -r --stdin -z'.split()
+        difftree = sub.Popen(cmd, stdin=revlist.stdout, stdout=sub.PIPE)
         for newblob, modflag, path in difftreez_reader(difftree.stdout):
             bsize = blobsizes.get(newblob)
             if bsize:                     # We care about this blob
                 pathsizes[path].add(bsize)
         time1 = time.time()
         self.verbose('Found %d paths in %.3f s' % (len(pathsizes), time1-time0))
-        maxlen = max(map(len,pathsizes)) if pathsizes else 0
-        for path, sizes in sorted(pathsizes.items(), cmp=lambda (p1,s1),(p2,s2): cmp(max(s1),max(s2)), reverse=True):
-            print('%-*s filter=fat -text # %10d %d' % (maxlen, path,max(sizes),len(sizes)))
+        maxlen = max(map(len, pathsizes)) if pathsizes else 0
+
+        sort_func = lambda (p1, s1), (p2, s2): cmp(max(s1), max(s2))
+
+        for path, sizes in sorted(pathsizes.items(), cmp=sort_func, reverse=True):
+            print('%-*s filter=fat -text # %10d %d' % (maxlen, path, max(sizes), len(sizes)))
+
         revlist.wait()
         difftree.wait()
+
     def cmd_index_filter(self, args):
         manage_gitattributes = '--manage-gitattributes' in args
         filelist = set(f.strip() for f in open(args[0]).readlines())
-        lsfiles = subprocess.Popen(['git', 'ls-files', '-s'], stdout=subprocess.PIPE)
-        updateindex = subprocess.Popen(['git', 'update-index', '--index-info'], stdin=subprocess.PIPE)
+        lsfiles = sub.Popen(['git', 'ls-files', '-s'], stdout=sub.PIPE)
+        updateindex = sub.Popen(['git', 'update-index', '--index-info'], stdin=sub.PIPE)
         for line in lsfiles.stdout:
             mode, sep, tail = line.partition(' ')
             blobhash, sep, tail = tail.partition(' ')
@@ -481,11 +537,15 @@ class GitFat(object):
             try:
                 cleanedobj = open(hashfile).read().rstrip()
             except IOError:
-                catfile = subprocess.Popen(['git', 'cat-file', 'blob', blobhash], stdout=subprocess.PIPE)
-                hashobject = subprocess.Popen(['git', 'hash-object', '-w', '--stdin'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+                catfile = sub.Popen(['git', 'cat-file', 'blob', blobhash], stdout=sub.PIPE)
+                hashobject = sub.Popen(
+                    ['git', 'hash-object', '-w', '--stdin'],
+                    stdin=sub.PIPE, stdout=sub.PIPE)
+
                 def dofilter():
                     self.filter_clean(catfile.stdout, hashobject.stdin)
                     hashobject.stdin.close()
+
                 filterclean = threading.Thread(target=dofilter)
                 filterclean.start()
                 cleanedobj = hashobject.stdout.read().rstrip()
@@ -497,13 +557,15 @@ class GitFat(object):
             updateindex.stdin.write('%s %s %s\t%s\n' % (mode, cleanedobj, stageno, filename))
         if manage_gitattributes:
             try:
-                mode, blobsha1, stageno, filename = subprocess.check_output(['git', 'ls-files', '-s', '.gitattributes']).split()
-                gitattributes_lines = subprocess.check_output(['git', 'cat-file', 'blob', blobsha1]).splitlines()
+                mode, blobsha1, stageno, filename = sub.check_output(
+                    ['git', 'ls-files', '-s', '.gitattributes']).split()
+                gitattributes_lines = sub.check_output(['git', 'cat-file', 'blob', blobsha1]).splitlines()
             except ValueError:  # Nothing to unpack, thus no file
                 mode, stageno = '100644', '0'
                 gitattributes_lines = []
             gitattributes_extra = ['%s filter=fat -text' % line.split()[0] for line in filelist]
-            hashobject = subprocess.Popen(['git', 'hash-object', '-w', '--stdin'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            hashobject = sub.Popen(
+                ['git', 'hash-object', '-w', '--stdin'], stdin=sub.PIPE, stdout=sub.PIPE)
             stdout, stderr = hashobject.communicate('\n'.join(gitattributes_lines + gitattributes_extra) + '\n')
             updateindex.stdin.write('%s %s %s\t%s\n' % (mode, stdout.strip(), stageno, '.gitattributes'))
         updateindex.stdin.close()
