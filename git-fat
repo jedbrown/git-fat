@@ -15,7 +15,7 @@ import collections
 
 try:
     from subprocess import check_output
-    del check_output
+    del check_output  # noqa
 
 except ImportError:
 
@@ -78,6 +78,9 @@ def umask():
 
 
 def readblocks(stream):
+    '''
+    Reads BLOCK_SIZE from stream and yields it
+    '''
     bytes = 0
     while True:
         data = stream.read(BLOCK_SIZE)
@@ -146,9 +149,8 @@ class GitFat(object):
 
     DecodeError = RuntimeError
 
-    # TODO: Checkconfig ASB
-
     def __init__(self):
+
         self.verbose = verbose_stderr if os.environ.get('GIT_FAT_VERBOSE') else verbose_ignore
         self.gitroot = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
         self.gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
@@ -206,20 +208,24 @@ class GitFat(object):
         'Produce representation of file to be stored in repository. 20 characters can hold 64-bit integers.'
         return '#$# git-fat %s %20d\n' % (digest, bytes)
 
-    def decode(self, string, noraise=False):
+    def decode(self, block, noraise=False):
         cookie = '#$# git-fat '
-        if string.startswith(cookie):
-            parts = string[len(cookie):].split()
+        # If the file contains the magic number
+        if block.startswith(cookie):
+            parts = block[len(cookie):].split()
             digest = parts[0]
             bytes = int(parts[1]) if len(parts) > 1 else None
             return digest, bytes
         elif noraise:
             return None, None
         else:
-            raise GitFat.DecodeError('Could not decode %s' % (string))
+            raise GitFat.DecodeError('Could not decode %s' % (block))
 
     def decode_stream(self, stream):
-        'Return digest if git-fat cache, otherwise return iterator over entire file contents'
+        '''
+        Return digest if git-fat cache, otherwise return iterator over entire file contents
+        '''
+        # TODO: rewrite me to return only objects of one type
         preamble = stream.read(self.magiclen)
         try:
             return self.decode(preamble)
@@ -252,33 +258,48 @@ class GitFat(object):
         digest, bytes = self.decode(body, noraise=True)
         return digest
 
-    def filter_clean(self, instream, outstreamclean):
-        h = hashlib.new('sha1')
+    def filter_clean(self, instream, oustream_toindex):
+        self.verbose("In filter clean")
+        
+        hasher = hashlib.new('sha1')
         bytes = 0
         fd, tmpname = tempfile.mkstemp(dir=self.objdir)
+
         try:
-            ishanging = False
-            cached = False                # changes to True when file is cached
-            with os.fdopen(fd, 'w') as cache:
-                outstream = cache
-                # why is this here
-                blockiter = readblocks(instream)  # noqa
-                firstblock = True
-                for block in readblocks(instream):
-                    if firstblock:
-                        if len(block) == self.magiclen and self.decode_clean(block[0:self.magiclen]):
-                            ishanging = True  # Working tree version is verbatim from repository (not smudged)
-                            outstream = outstreamclean
-                        firstblock = False
-                    h.update(block)
-                    bytes += len(block)
-                    outstream.write(block)
-                outstream.flush()
-            digest = h.hexdigest()
+            # when already_clean == True, the working copy matches local repository (already clean)
+            already_clean = False
+            # Changes to True when file exists in .git/fat/objects
+            cached = False
+            # Open the temporary file for writing
+            ostream = os.fdopen(fd, 'w')
+
+            firstblock = True
+            for block in readblocks(instream):
+
+                if firstblock:
+                    if len(block) == self.magiclen and self.decode_clean(block[0:self.magiclen]):
+                        already_clean = True
+                        # Prevent writing of duplicate fatfile
+                        # write clean file to index
+                        ostream.close()
+                        ostream = oustream_toindex
+                    firstblock = False
+
+                # Add the block to be hashed
+                hasher.update(block)
+                bytes += len(block)
+                ostream.write(block)
+
+            ostream.flush()
+            digest = hasher.hexdigest()
             objfile = os.path.join(self.objdir, digest)
-            if not ishanging:
+
+            # Create placeholder for the file
+            if not already_clean:
+                # Close temporary file
+                ostream.close()
                 if os.path.exists(objfile):
-                    self.verbose('git-fat filter-clean: cache already exists %s' % objfile)
+                    self.verbose('git-fat filter-clean: cached file already exists %s' % objfile)
                     os.remove(tmpname)
                 else:
                     # Set permissions for the new file using the current umask
@@ -286,7 +307,7 @@ class GitFat(object):
                     os.rename(tmpname, objfile)
                     self.verbose('git-fat filter-clean: caching to %s' % objfile)
                 cached = True
-                outstreamclean.write(self.encode(digest, bytes))
+                oustream_toindex.write(self.encode(digest, bytes))
         finally:
             if not cached:
                 os.remove(tmpname)
@@ -346,7 +367,9 @@ class GitFat(object):
         return referenced
 
     def orphan_files(self, patterns=[]):
-        'generator for all orphan placeholders in the working tree'
+        '''
+        generator for all orphan placeholders in the working tree
+        '''
         for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
             digest = self.decode_file(fname)[0]
             if digest:
@@ -371,9 +394,6 @@ class GitFat(object):
             print('Garbage objects:')
             for g in garbage:
                 print('    ' + g)
-
-    def is_dirty(self):
-        return sub.call(['git', 'diff-index', '--quiet', 'HEAD']) == 0
 
     def cmd_push(self, args):
         '''
@@ -456,13 +476,56 @@ class GitFat(object):
             print('%10d %s' % (os.stat(fname).st_size, obj))
             os.remove(fname)
 
+    def can_add_file(self, filename):
+        '''
+        Checks to see if the current file exists in the local repo before filter-clean
+        If it exists, check the filesize
+        if the filesize is not magiclen, return false
+        git hash-object <filename> | xargs git cat-file -s
+        [size]
+        '''
+        # TODO: check if running this after git-fat init but before git-fat pull is harmful
+        self.verbose("Hashing {}".format(filename))
+        hashed = git('hash-object --no-filters'.split() + [filename], stdout=sub.PIPE).stdout.read().strip()
+        self.verbose("Hash of {} is {}".format(filename, hashed))
+        getsize = git('cat-file -s {}'.format(hashed).split(), stdout=sub.PIPE, stderr=sub.PIPE)
+        # If the subprocess returns non-zero, then it's not in our repo
+        #   (unless someone manually added it to .git/objects)
+        if (getsize.wait()):
+            self.verbose(getsize.stderr.read())
+            return True
+
+        showfile = git('show HEAD:{}'.format(filename).split(), stdout=sub.PIPE)
+
+        # TODO: Don't actually do this.  Just for testing
+        if (showfile.wait()):
+            return True
+        try:
+            digest, bytes = self.decode_stream(showfile.stdout)
+        except IOError:
+            return False
+
+        if isinstance(digest, str):
+            return True
+        else:
+            return False
+
+    def checkconfig(self):
+        '''
+        Returns true if git-fat is already configured
+        '''
+        return gitconfig_get('filter.fat.clean') and gitconfig_get('filter.fat.smudge')
+
     def cmd_init(self):
+
         mkdir_p(self.objdir)
+
         if gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge'):
             print('Git fat already configured, check configuration in .git/config')
+
         else:
-            gitconfig_set('filter.fat.clean', 'git-fat filter-clean')
-            gitconfig_set('filter.fat.smudge', 'git-fat filter-smudge')
+            gitconfig_set('filter.fat.clean', 'git-fat filter-clean %f')
+            gitconfig_set('filter.fat.smudge', 'git-fat filter-smudge %f')
             print('Initialized git fat')
 
     def gen_large_blobs(self, revs, threshsize):
@@ -478,7 +541,7 @@ class GitFat(object):
             output.close()
 
         revlist = git(['rev-list', '--all', '--objects'], stdout=sub.PIPE, bufsize=-1)
-        objcheck = git(['cat-file', '--batch-check'], stdin=sub.PIPE, stdout=sub.PIPE, bufsize=-1 )
+        objcheck = git(['cat-file', '--batch-check'], stdin=sub.PIPE, stdout=sub.PIPE, bufsize=-1)
 
         hashonly = threading.Thread(target=hash_only, args=(revlist.stdout, objcheck.stdin))
         hashonly.start()
@@ -581,9 +644,18 @@ class GitFat(object):
 if __name__ == '__main__':
     fat = GitFat()
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
+    # If we're not configured and they're not calling init
+    if not fat.checkconfig() and not cmd == 'init':
+        sys.stderr.write("git-fat not configured. First run git fat init\n")
+        sys.exit(1)
     if cmd == 'filter-clean':
-        fat.cmd_filter_clean()
+        verbose_stderr(sys.argv[2])
+        if fat.can_add_file(sys.argv[2]):
+            fat.cmd_filter_clean()
+        else:
+            cat(sys.stdin, sys.stdout)
     elif cmd == 'filter-smudge':
+        verbose_stderr(sys.argv[2])
         fat.cmd_filter_smudge()
     elif cmd == 'init':
         fat.cmd_init()
