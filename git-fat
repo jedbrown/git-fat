@@ -208,6 +208,17 @@ class GitFat(object):
         'Produce representation of file to be stored in repository. 20 characters can hold 64-bit integers.'
         return '#$# git-fat %s %20d\n' % (digest, bytes)
 
+    def new_decode(self, stream):
+        '''
+        Returns stream object and true if stream is git-fat file
+        '''
+        cookie = '#$# git-fat '
+        block = stream.read(self.magiclen)
+        stream.seek(0,0)
+        if block.startswith(cookie):
+            return stream, True
+        return stream, False
+
     def decode(self, block, noraise=False):
         cookie = '#$# git-fat '
         # If the file contains the magic number
