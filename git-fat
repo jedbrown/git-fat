@@ -20,13 +20,13 @@ try:
 except ImportError:
 
     def backport_check_output(*popenargs, **kwargs):
-        r"""Run command with arguments and return its output as a byte string.
-
+        '''
+        Run command with arguments and return its output as a byte string.
         Backported from Python 2.7 as it's implemented as pure python on stdlib.
 
         >> check_output(['/usr/bin/python', '--version'])
         Python 2.6.2
-        """
+        '''
         process = sub.Popen(stdout=sub.PIPE, *popenargs, **kwargs)
         output, unused_err = process.communicate()
         retcode = process.poll()
@@ -42,6 +42,11 @@ except ImportError:
     sub.check_output = backport_check_output
 
 BLOCK_SIZE = 4096
+
+
+def git(cliargs, *args, **kwargs):
+    ''' Calls git commands with Popen arguments '''
+    return sub.Popen(['git'] + cliargs, *args, **kwargs)
 
 
 def verbose_stderr(*args, **kwargs):
@@ -64,7 +69,9 @@ def mkdir_p(path):
 
 
 def umask():
-    """Get umask without changing it."""
+    '''
+    Get umask without changing it.
+    '''
     old = os.umask(0)
     os.umask(old)
     return old
@@ -90,10 +97,10 @@ def cat(instream, outstream):
 
 
 def difftreez_reader(input):
-    """Incremental reader for git diff-tree -z output
-
+    '''
+    Incremental reader for git diff-tree -z output
     :oldmode newmode oldsha1 newsha1 modflag\0filename\0:oldmode newmode ...
-    """
+    '''
     buffer = []
     partial = ''
     while True:
@@ -115,11 +122,11 @@ def difftreez_reader(input):
 
 
 def gitconfig_get(name, file=None):
-    args = ['git', 'config', '--get']
+    args = ['config', '--get']
     if file is not None:
         args += ['--file', file]
     args.append(name)
-    p = sub.Popen(args, stdout=sub.PIPE)
+    p = git(args, stdout=sub.PIPE)
     output = p.communicate()[0].strip()
     if p.returncode != 0:
         return None
@@ -136,7 +143,10 @@ def gitconfig_set(name, value, file=None):
 
 
 class GitFat(object):
+
     DecodeError = RuntimeError
+
+    # TODO: Checkconfig ASB
 
     def __init__(self):
         self.verbose = verbose_stderr if os.environ.get('GIT_FAT_VERBOSE') else verbose_ignore
@@ -154,9 +164,6 @@ class GitFat(object):
 
         self.magiclen = magiclen(self.encode)  # Current version
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]]  # All prior versions
-
-    def setup(self):
-        mkdir_p(self.objdir)
 
     def get_rsync(self):
         cfgpath = os.path.join(self.gitroot, '.gitfat')
@@ -289,11 +296,9 @@ class GitFat(object):
         The clean filter runs when a file is added to the index. It gets the "smudged" (tree)
         version of the file on stdin and produces the "clean" (repository) version on stdout.
         '''
-        self.setup()
         self.filter_clean(sys.stdin, sys.stdout)
 
     def cmd_filter_smudge(self):
-        self.setup()
         result, bytes = self.decode_stream(sys.stdin)
         if isinstance(result, str):       # We got a digest
             objfile = os.path.join(self.objdir, result)
@@ -317,8 +322,9 @@ class GitFat(object):
             rev = '--all'
         elif rev is None:
             rev = self.revparse('HEAD')
-        p1 = sub.Popen(['git', 'rev-list', '--objects', rev], stdout=sub.PIPE)
-        p2 = sub.Popen(['git', 'cat-file', '--batch-check'], stdin=sub.PIPE, stdout=sub.PIPE)
+
+        p1 = git(['rev-list', '--objects', rev], stdout=sub.PIPE)
+        p2 = git(['cat-file', '--batch-check'], stdin=sub.PIPE, stdout=sub.PIPE)
 
         def cut_sha1hash(input, output):
             for line in input:
@@ -347,7 +353,6 @@ class GitFat(object):
                 yield (digest, fname)
 
     def cmd_status(self, args):
-        self.setup()
         catalog = self.catalog_objects()
         refargs = dict()
         if '--all' in args:
@@ -371,8 +376,9 @@ class GitFat(object):
         return sub.call(['git', 'diff-index', '--quiet', 'HEAD']) == 0
 
     def cmd_push(self, args):
-        'Push anything that I have stored and referenced'
-        self.setup()
+        '''
+        Push anything that I have stored and referenced
+        '''
         # Default to push only those objects referenced by current HEAD
         # (includes history). Finer-grained pushing would be useful.
         pushall = '--all' in args
@@ -383,7 +389,9 @@ class GitFat(object):
         p.communicate(input='\x00'.join(files))
 
     def checkout(self, show_orphans=False):
-        'Update any stale files in the present working tree'
+        '''
+        Update any stale files in the present working tree
+        '''
         for digest, fname in self.orphan_files():
             objpath = os.path.join(self.objdir, digest)
             if os.access(objpath, os.R_OK):
@@ -401,8 +409,9 @@ class GitFat(object):
                 print('Data unavailable: %s %s' % (digest, fname))
 
     def cmd_pull(self, args):
-        'Pull anything that I have referenced, but not stored'
-        self.setup()
+        '''
+        Pull anything that I have referenced, but not stored
+        '''
         refargs = dict()
         if '--all' in args:
             refargs['all'] = True
@@ -448,7 +457,7 @@ class GitFat(object):
             os.remove(fname)
 
     def cmd_init(self):
-        self.setup()
+        mkdir_p(self.objdir)
         if gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge'):
             print('Git fat already configured, check configuration in .git/config')
         else:
@@ -468,11 +477,9 @@ class GitFat(object):
                 output.write(line[:40] + '\n')
             output.close()
 
-        revlist = sub.Popen(['git', 'rev-list', '--all', '--objects'], stdout=sub.PIPE, bufsize=-1)
-        objcheck = sub.Popen(
-            ['git', 'cat-file', '--batch-check'],
-            stdin=sub.PIPE, stdout=sub.PIPE, bufsize=-1
-            )
+        revlist = git(['rev-list', '--all', '--objects'], stdout=sub.PIPE, bufsize=-1)
+        objcheck = git(['cat-file', '--batch-check'], stdin=sub.PIPE, stdout=sub.PIPE, bufsize=-1 )
+
         hashonly = threading.Thread(target=hash_only, args=(revlist.stdout, objcheck.stdin))
         hashonly.start()
         numblobs, numlarge = 0, 1
@@ -498,9 +505,9 @@ class GitFat(object):
         time0 = time.time()
         # Find all names assumed by large blobs (those in blobsizes)
         pathsizes = collections.defaultdict(lambda: set())
-        revlist = sub.Popen(['git', 'rev-list', '--all'], stdout=sub.PIPE, bufsize=-1)
-        cmd = 'git diff-tree --root --no-renames --no-commit-id --diff-filter=AMCR -r --stdin -z'.split()
-        difftree = sub.Popen(cmd, stdin=revlist.stdout, stdout=sub.PIPE)
+        revlist = git(['rev-list', '--all'], stdout=sub.PIPE, bufsize=-1)
+        cmd = 'diff-tree --root --no-renames --no-commit-id --diff-filter=AMCR -r --stdin -z'.split()
+        difftree = git(cmd, stdin=revlist.stdout, stdout=sub.PIPE)
         for newblob, modflag, path in difftreez_reader(difftree.stdout):
             bsize = blobsizes.get(newblob)
             if bsize:                     # We care about this blob
@@ -517,60 +524,58 @@ class GitFat(object):
         revlist.wait()
         difftree.wait()
 
-    def cmd_index_filter(self, args):
-        manage_gitattributes = '--manage-gitattributes' in args
-        filelist = set(f.strip() for f in open(args[0]).readlines())
-        lsfiles = sub.Popen(['git', 'ls-files', '-s'], stdout=sub.PIPE)
-        updateindex = sub.Popen(['git', 'update-index', '--index-info'], stdin=sub.PIPE)
-        for line in lsfiles.stdout:
-            mode, sep, tail = line.partition(' ')
-            blobhash, sep, tail = tail.partition(' ')
-            stageno, sep, tail = tail.partition('\t')
-            filename = tail.strip()
-            if filename not in filelist:
-                continue
-            if mode == "120000":
-                # skip symbolic links
-                continue
-            # This file will contain the hash of the cleaned object
-            hashfile = os.path.join(self.gitdir, 'fat', 'index-filter', blobhash)
-            try:
-                cleanedobj = open(hashfile).read().rstrip()
-            except IOError:
-                catfile = sub.Popen(['git', 'cat-file', 'blob', blobhash], stdout=sub.PIPE)
-                hashobject = sub.Popen(
-                    ['git', 'hash-object', '-w', '--stdin'],
-                    stdin=sub.PIPE, stdout=sub.PIPE)
-
-                def dofilter():
-                    self.filter_clean(catfile.stdout, hashobject.stdin)
-                    hashobject.stdin.close()
-
-                filterclean = threading.Thread(target=dofilter)
-                filterclean.start()
-                cleanedobj = hashobject.stdout.read().rstrip()
-                catfile.wait()
-                hashobject.wait()
-                filterclean.join()
-                mkdir_p(os.path.dirname(hashfile))
-                open(hashfile, 'w').write(cleanedobj + '\n')
-            updateindex.stdin.write('%s %s %s\t%s\n' % (mode, cleanedobj, stageno, filename))
-        if manage_gitattributes:
-            try:
-                mode, blobsha1, stageno, filename = sub.check_output(
-                    ['git', 'ls-files', '-s', '.gitattributes']).split()
-                gitattributes_lines = sub.check_output(['git', 'cat-file', 'blob', blobsha1]).splitlines()
-            except ValueError:  # Nothing to unpack, thus no file
-                mode, stageno = '100644', '0'
-                gitattributes_lines = []
-            gitattributes_extra = ['%s filter=fat -text' % line.split()[0] for line in filelist]
-            hashobject = sub.Popen(
-                ['git', 'hash-object', '-w', '--stdin'], stdin=sub.PIPE, stdout=sub.PIPE)
-            stdout, stderr = hashobject.communicate('\n'.join(gitattributes_lines + gitattributes_extra) + '\n')
-            updateindex.stdin.write('%s %s %s\t%s\n' % (mode, stdout.strip(), stageno, '.gitattributes'))
-        updateindex.stdin.close()
-        lsfiles.wait()
-        updateindex.wait()
+#   TODO: Revisit this if/when I feel it's necessary/I want it
+#    def cmd_index_filter(self, args):
+#        manage_gitattributes = '--manage-gitattributes' in args
+#        filelist = set(f.strip() for f in open(args[0]).readlines())
+#        lsfiles = git(['ls-files', '-s'], stdout=sub.PIPE)
+#        updateindex = git(['update-index', '--index-info'], stdin=sub.PIPE)
+#        for line in lsfiles.stdout:
+#            mode, sep, tail = line.partition(' ')
+#            blobhash, sep, tail = tail.partition(' ')
+#            stageno, sep, tail = tail.partition('\t')
+#            filename = tail.strip()
+#            if filename not in filelist:
+#                continue
+#            if mode == "120000":
+#                # skip symbolic links
+#                continue
+#            # This file will contain the hash of the cleaned object
+#            hashfile = os.path.join(self.gitdir, 'fat', 'index-filter', blobhash)
+#            try:
+#                cleanedobj = open(hashfile).read().rstrip()
+#            except IOError:
+#                catfile = git(['cat-file', 'blob', blobhash], stdout=sub.PIPE)
+#                hashobject = git(['hash-object', '-w', '--stdin'], stdin=sub.PIPE, stdout=sub.PIPE)
+#
+#                def dofilter():
+#                    self.filter_clean(catfile.stdout, hashobject.stdin)
+#                    hashobject.stdin.close()
+#
+#                filterclean = threading.Thread(target=dofilter)
+#                filterclean.start()
+#                cleanedobj = hashobject.stdout.read().rstrip()
+#                catfile.wait()
+#                hashobject.wait()
+#                filterclean.join()
+#                mkdir_p(os.path.dirname(hashfile))
+#                open(hashfile, 'w').write(cleanedobj + '\n')
+#            updateindex.stdin.write('%s %s %s\t%s\n' % (mode, cleanedobj, stageno, filename))
+#        if manage_gitattributes:
+#            try:
+#                mode, blobsha1, stageno, filename = sub.check_output(
+#                    ['git', 'ls-files', '-s', '.gitattributes']).split()
+#                gitattributes_lines = sub.check_output(['git', 'cat-file', 'blob', blobsha1]).splitlines()
+#            except ValueError:  # Nothing to unpack, thus no file
+#                mode, stageno = '100644', '0'
+#                gitattributes_lines = []
+#            gitattributes_extra = ['%s filter=fat -text' % line.split()[0] for line in filelist]
+#            hashobject = git(['hash-object', '-w', '--stdin'], stdin=sub.PIPE, stdout=sub.PIPE)
+#            stdout, stderr = hashobject.communicate('\n'.join(gitattributes_lines + gitattributes_extra) + '\n')
+#            updateindex.stdin.write('%s %s %s\t%s\n' % (mode, stdout.strip(), stageno, '.gitattributes'))
+#        updateindex.stdin.close()
+#        lsfiles.wait()
+#        updateindex.wait()
 
 
 if __name__ == '__main__':
@@ -594,7 +599,7 @@ if __name__ == '__main__':
         fat.cmd_checkout(sys.argv[2:])
     elif cmd == 'find':
         fat.cmd_find(sys.argv[2:])
-    elif cmd == 'index-filter':
-        fat.cmd_index_filter(sys.argv[2:])
+#    elif cmd == 'index-filter':
+#        fat.cmd_index_filter(sys.argv[2:])
     else:
         print('Usage: git fat [init|status|push|pull|gc|checkout|find|index-filter]', file=sys.stderr)
