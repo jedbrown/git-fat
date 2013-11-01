@@ -400,6 +400,10 @@ class GitFat(object):
         self.verbose('%d of %d blobs are >= %d bytes [elapsed %.3fs]' % (numlarge, numblobs, threshsize, time1-time0))
 
     def filter_clean(self, instream, ostream_toindex):
+        '''
+        The clean filter runs when a file is added to the index. It gets the "smudged" (tree)
+        version of the file on stdin and produces the "clean" (repository) version on stdout.
+        '''
 
         self.verbose("In filter clean for file {}".format(sys.argv[2]))
         hasher = hashlib.new('sha1')
@@ -447,14 +451,7 @@ class GitFat(object):
             if not cached:
                 os.remove(tmpname)
 
-    def cmd_filter_clean(self):
-        '''
-        The clean filter runs when a file is added to the index. It gets the "smudged" (tree)
-        version of the file on stdin and produces the "clean" (repository) version on stdout.
-        '''
-        self.filter_clean(sys.stdin, sys.stdout)
-
-    def cmd_pull(self, args):
+    def pull(self, args):
         '''
         Pull anything that I have referenced, but not stored
         '''
@@ -474,7 +471,7 @@ class GitFat(object):
         p.communicate(input='\x00'.join(files))
         self.checkout()
 
-    def cmd_init(self):
+    def init(self):
 
         mkdir_p(self.objdir)
         if gitconfig_get('filter.fat.clean') and gitconfig_get('filter.fat.smudge'):
@@ -485,10 +482,7 @@ class GitFat(object):
             gitconfig_set('filter.fat.smudge', 'git-fat filter-smudge %f')
             print('Initialized git fat')
 
-    def cmd_checkout(self, args):
-        self.checkout(show_orphans=True)
-
-    def cmd_gc(self):
+    def gc(self):
         garbage = self.catalog_objects() - self.referenced_objects()
         print('Unreferenced objects to remove: %d' % len(garbage))
         for obj in garbage:
@@ -496,7 +490,7 @@ class GitFat(object):
             print('%10d %s' % (os.stat(fname).st_size, obj))
             os.remove(fname)
 
-    def cmd_filter_smudge(self):
+    def filter_smudge(self):
         stream, fatfile = self.new_decode(sys.stdin)
         if fatfile:
             block = next(stream)  # read the first block
@@ -512,7 +506,7 @@ class GitFat(object):
             self.verbose('git-fat filter-smudge: not a managed file')
             cat_iter(stream, sys.stdout)
 
-    def cmd_find(self, args):
+    def find(self, args):
         maxsize = int(args[0])
         blobsizes = dict(self.gen_large_blobs('--all', maxsize))
         time0 = time.time()
@@ -537,7 +531,7 @@ class GitFat(object):
         revlist.wait()
         difftree.wait()
 
-    def cmd_status(self, args):
+    def status(self, args):
         catalog = self.catalog_objects()
         refargs = dict()
         if '--all' in args:
@@ -557,7 +551,7 @@ class GitFat(object):
             for g in garbage:
                 print('    ' + g)
 
-    def cmd_push(self, args):
+    def push(self, args):
         '''
         Push anything that I have stored and referenced
         '''
@@ -578,30 +572,31 @@ if __name__ == '__main__':
     if not fat.checkconfig() and not cmd == 'init':
         sys.stderr.write("git-fat not configured. First run: git fat init\n")
         sys.exit(1)
-    if cmd == 'filter-clean':
+    if cmd == 'init':
+        fat.init()
+    elif cmd == 'filter-clean':
         if fat.can_add_file(sys.argv[2]):
-            fat.cmd_filter_clean()
+            fat.filter_clean(sys.stdin, sys.stdout)
         else:
             verbose_stderr(
-                "Not adding {} as it is not a new file and is not managed by git-fat".format(sys.argv[2])
+                "Not adding: {}\n".format(sys.argv[2]) +
+                "It is not a new file and is not managed by git-fat"
             )
             cat(sys.stdin, sys.stdout)
     elif cmd == 'filter-smudge':
         verbose_stderr(sys.argv[2])
-        fat.cmd_filter_smudge()
-    elif cmd == 'init':
-        fat.cmd_init()
+        fat.filter_smudge()
     elif cmd == 'status':
-        fat.cmd_status(sys.argv[2:])
+        fat.status(sys.argv[2:])
     elif cmd == 'push':
-        fat.cmd_push(sys.argv[2:])
+        fat.push(sys.argv[2:])
     elif cmd == 'pull':
-        fat.cmd_pull(sys.argv[2:])
+        fat.pull(sys.argv[2:])
     elif cmd == 'gc':
-        fat.cmd_gc()
+        fat.gc()
     elif cmd == 'checkout':
-        fat.cmd_checkout(sys.argv[2:])
+        fat.checkout(show_orphans=True)
     elif cmd == 'find':
-        fat.cmd_find(sys.argv[2:])
+        fat.find(sys.argv[2:])
     else:
         print('Usage: git fat [init|status|push|pull|gc|checkout|find|index-filter]', file=sys.stderr)
