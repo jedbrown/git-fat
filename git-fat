@@ -267,6 +267,138 @@ class GitFat(object):
         else:
             return None, bytes
 
+    def catalog_objects(self):
+        return set(os.listdir(self.objdir))
+
+    def referenced_objects(self, rev=None, all=False):
+        referenced = set()
+        if all:
+            rev = '--all'
+        elif rev is None:
+            rev = self.revparse('HEAD')
+
+        p1 = git(['rev-list', '--objects', rev], stdout=sub.PIPE)
+        p2 = git(['cat-file', '--batch-check'], stdin=sub.PIPE, stdout=sub.PIPE)
+
+        def cut_sha1hash(input, output):
+            for line in input:
+                output.write(line.split()[0] + '\n')
+            output.close()
+        cut_thread = threading.Thread(target=cut_sha1hash, args=(p1.stdout, p2.stdin))
+        cut_thread.start()
+        for line in p2.stdout:
+            objhash, objtype, size = line.split()
+            if objtype == 'blob' and int(size) in self.magiclens:
+                try:
+                    fathash = self.decode(sub.check_output(['git', 'cat-file', '-p', objhash]))[0]
+                    referenced.add(fathash)
+                except GitFat.DecodeError:
+                    pass
+        cut_thread.join()
+        p1.wait()
+        p2.wait()
+        return referenced
+
+    def orphan_files(self, patterns=[]):
+        '''
+        generator for all orphan placeholders in the working tree
+        '''
+        for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
+            digest = self.decode_file(fname)[0]
+            if digest:
+                yield (digest, fname)
+
+    def checkout(self, show_orphans=False):
+        '''
+        Update any stale files in the present working tree
+        '''
+        for digest, fname in self.orphan_files():
+            objpath = os.path.join(self.objdir, digest)
+            if os.access(objpath, os.R_OK):
+                print('Restoring %s -> %s' % (digest, fname))
+                # The output of our smudge filter depends on the existence of
+                # the file in .git/fat/objects, but git caches the file stat
+                # from the previous time the file was smudged, therefore it
+                # won't try to re-smudge. I don't know a git command that
+                # specifically invalidates that cache, but touching the file
+                # also does the trick.
+                os.utime(fname, None)
+                # This re-smudge is essentially a copy that restores permissions.
+                sub.check_call(['git', 'checkout-index', '--index', '--force', fname])
+            elif show_orphans:
+                print('Data unavailable: %s %s' % (digest, fname))
+
+    def parse_pull_patterns(self, args):
+        if '--' not in args:
+            return ['']
+        else:
+            idx = args.index('--')
+            patterns = args[idx+1:]  # we don't care about '--'
+            return patterns
+
+    def filter_objects(self, refargs, patterns):
+        files = self.referenced_objects(**refargs) - self.catalog_objects()
+        files_set = set(files)
+        orphans_matched = list(self.orphan_files(patterns))
+        print("pulling:")
+        print(map(lambda x: x[1], orphans_matched))
+        orphans_objects = set(map(lambda x: x[0], orphans_matched))
+        return files_set & orphans_objects
+
+    def can_add_file(self, filename):
+        '''
+        Checks to see if the current file exists in the local repo before filter-clean
+        This method prevents fat from hijacking glob matches that are old
+        TODO: Add a method for explicitly adding glob files
+        '''
+        # If the file doesn't exist in the previous revision, add it
+        showfile = git('show HEAD:{}'.format(filename).split(), stdout=sub.PIPE, stderr=sub.PIPE)
+        if (showfile.wait()):
+            return True
+        # If it is already tracked, add it
+        stream, is_fatfile = self.new_decode(showfile.stdout)
+        return is_fatfile
+
+    def checkconfig(self):
+        '''
+        Returns true if git-fat is already configured
+        '''
+        return gitconfig_get('filter.fat.clean') and gitconfig_get('filter.fat.smudge')
+
+    def gen_large_blobs(self, revs, threshsize):
+        """Build dict of all blobs"""
+        time0 = time.time()
+
+        def hash_only(input, output):
+            """The output of git rev-list --objects shows extra info for blobs, subdirectory trees, and tags.
+            This truncates to one hash per line.
+            """
+            for line in input:
+                output.write(line[:40] + '\n')
+            output.close()
+
+        revlist = git(['rev-list', '--all', '--objects'], stdout=sub.PIPE, bufsize=-1)
+        objcheck = git(['cat-file', '--batch-check'], stdin=sub.PIPE, stdout=sub.PIPE, bufsize=-1)
+
+        hashonly = threading.Thread(target=hash_only, args=(revlist.stdout, objcheck.stdin))
+        hashonly.start()
+        numblobs, numlarge = 0, 1
+        # Build dict with the sizes of all large blobs
+        for line in objcheck.stdout:
+            objhash, blob, size = line.split()
+            if blob != 'blob':
+                continue
+            size = int(size)
+            numblobs += 1
+            if size > threshsize:
+                numlarge += 1
+                yield objhash, size
+        revlist.wait()
+        objcheck.wait()
+        hashonly.join()
+        time1 = time.time()
+        self.verbose('%d of %d blobs are >= %d bytes [elapsed %.3fs]' % (numlarge, numblobs, threshsize, time1-time0))
+
     def filter_clean(self, instream, ostream_toindex):
 
         self.verbose("In filter clean for file {}".format(sys.argv[2]))
@@ -322,7 +454,49 @@ class GitFat(object):
         '''
         self.filter_clean(sys.stdin, sys.stdout)
 
-    def cmd_new_filter_smudge(self):
+    def cmd_pull(self, args):
+        '''
+        Pull anything that I have referenced, but not stored
+        '''
+        refargs = dict()
+        if '--all' in args:
+            refargs['all'] = True
+        for arg in args:
+            if arg.startswith('-') or len(arg) != 40:
+                continue
+            rev = self.revparse(arg)
+            if rev:
+                refargs['rev'] = rev
+        files = self.filter_objects(refargs, self.parse_pull_patterns(args))
+        cmd = self.get_rsync_command(push=False)
+        self.verbose('Executing: %s' % ' '.join(cmd))
+        p = sub.Popen(cmd, stdin=sub.PIPE)
+        p.communicate(input='\x00'.join(files))
+        self.checkout()
+
+    def cmd_init(self):
+
+        mkdir_p(self.objdir)
+        if gitconfig_get('filter.fat.clean') and gitconfig_get('filter.fat.smudge'):
+            print('Git fat already configured, check configuration in .git/config')
+
+        else:
+            gitconfig_set('filter.fat.clean', 'git-fat filter-clean %f')
+            gitconfig_set('filter.fat.smudge', 'git-fat filter-smudge %f')
+            print('Initialized git fat')
+
+    def cmd_checkout(self, args):
+        self.checkout(show_orphans=True)
+
+    def cmd_gc(self):
+        garbage = self.catalog_objects() - self.referenced_objects()
+        print('Unreferenced objects to remove: %d' % len(garbage))
+        for obj in garbage:
+            fname = os.path.join(self.objdir, obj)
+            print('%10d %s' % (os.stat(fname).st_size, obj))
+            os.remove(fname)
+
+    def cmd_filter_smudge(self):
         stream, fatfile = self.new_decode(sys.stdin)
         if fatfile:
             block = next(stream)  # read the first block
@@ -338,61 +512,30 @@ class GitFat(object):
             self.verbose('git-fat filter-smudge: not a managed file')
             cat_iter(stream, sys.stdout)
 
-    def cmd_filter_smudge(self):
-        result, bytes = self.decode_stream(sys.stdin)
-        if isinstance(result, str):       # We got a digest
-            objfile = os.path.join(self.objdir, result)
-            try:
-                cat(open(objfile), sys.stdout)
-                self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
-            except IOError:                 # file not found
-                self.verbose('git-fat filter-smudge: fat object missing %s' % objfile)
-                # could leave a better notice about how to recover this file
-                sys.stdout.write(self.encode(result, bytes))
-        else:                             # We have an iterable over the original input.
-            self.verbose('git-fat filter-smudge: not a managed file')
-            cat_iter(result, sys.stdout)
+    def cmd_find(self, args):
+        maxsize = int(args[0])
+        blobsizes = dict(self.gen_large_blobs('--all', maxsize))
+        time0 = time.time()
+        # Find all names assumed by large blobs (those in blobsizes)
+        pathsizes = collections.defaultdict(lambda: set())
+        revlist = git(['rev-list', '--all'], stdout=sub.PIPE, bufsize=-1)
+        cmd = 'diff-tree --root --no-renames --no-commit-id --diff-filter=AMCR -r --stdin -z'.split()
+        difftree = git(cmd, stdin=revlist.stdout, stdout=sub.PIPE)
+        for newblob, modflag, path in difftreez_reader(difftree.stdout):
+            bsize = blobsizes.get(newblob)
+            if bsize:                     # We care about this blob
+                pathsizes[path].add(bsize)
+        time1 = time.time()
+        self.verbose('Found %d paths in %.3f s' % (len(pathsizes), time1-time0))
+        maxlen = max(map(len, pathsizes)) if pathsizes else 0
 
-    def catalog_objects(self):
-        return set(os.listdir(self.objdir))
+        sort_func = lambda (p1, s1), (p2, s2): cmp(max(s1), max(s2))
 
-    def referenced_objects(self, rev=None, all=False):
-        referenced = set()
-        if all:
-            rev = '--all'
-        elif rev is None:
-            rev = self.revparse('HEAD')
+        for path, sizes in sorted(pathsizes.items(), cmp=sort_func, reverse=True):
+            print('%-*s filter=fat -text # %10d %d' % (maxlen, path, max(sizes), len(sizes)))
 
-        p1 = git(['rev-list', '--objects', rev], stdout=sub.PIPE)
-        p2 = git(['cat-file', '--batch-check'], stdin=sub.PIPE, stdout=sub.PIPE)
-
-        def cut_sha1hash(input, output):
-            for line in input:
-                output.write(line.split()[0] + '\n')
-            output.close()
-        cut_thread = threading.Thread(target=cut_sha1hash, args=(p1.stdout, p2.stdin))
-        cut_thread.start()
-        for line in p2.stdout:
-            objhash, objtype, size = line.split()
-            if objtype == 'blob' and int(size) in self.magiclens:
-                try:
-                    fathash = self.decode(sub.check_output(['git', 'cat-file', '-p', objhash]))[0]
-                    referenced.add(fathash)
-                except GitFat.DecodeError:
-                    pass
-        cut_thread.join()
-        p1.wait()
-        p2.wait()
-        return referenced
-
-    def orphan_files(self, patterns=[]):
-        '''
-        generator for all orphan placeholders in the working tree
-        '''
-        for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
-            digest = self.decode_file(fname)[0]
-            if digest:
-                yield (digest, fname)
+        revlist.wait()
+        difftree.wait()
 
     def cmd_status(self, args):
         catalog = self.catalog_objects()
@@ -427,218 +570,6 @@ class GitFat(object):
         p = sub.Popen(cmd, stdin=sub.PIPE)
         p.communicate(input='\x00'.join(files))
 
-    def checkout(self, show_orphans=False):
-        '''
-        Update any stale files in the present working tree
-        '''
-        for digest, fname in self.orphan_files():
-            objpath = os.path.join(self.objdir, digest)
-            if os.access(objpath, os.R_OK):
-                print('Restoring %s -> %s' % (digest, fname))
-                # The output of our smudge filter depends on the existence of
-                # the file in .git/fat/objects, but git caches the file stat
-                # from the previous time the file was smudged, therefore it
-                # won't try to re-smudge. I don't know a git command that
-                # specifically invalidates that cache, but touching the file
-                # also does the trick.
-                os.utime(fname, None)
-                # This re-smudge is essentially a copy that restores permissions.
-                sub.check_call(['git', 'checkout-index', '--index', '--force', fname])
-            elif show_orphans:
-                print('Data unavailable: %s %s' % (digest, fname))
-
-    def cmd_pull(self, args):
-        '''
-        Pull anything that I have referenced, but not stored
-        '''
-        refargs = dict()
-        if '--all' in args:
-            refargs['all'] = True
-        for arg in args:
-            if arg.startswith('-') or len(arg) != 40:
-                continue
-            rev = self.revparse(arg)
-            if rev:
-                refargs['rev'] = rev
-        files = self.filter_objects(refargs, self.parse_pull_patterns(args))
-        cmd = self.get_rsync_command(push=False)
-        self.verbose('Executing: %s' % ' '.join(cmd))
-        p = sub.Popen(cmd, stdin=sub.PIPE)
-        p.communicate(input='\x00'.join(files))
-        self.checkout()
-
-    def parse_pull_patterns(self, args):
-        if '--' not in args:
-            return ['']
-        else:
-            idx = args.index('--')
-            patterns = args[idx+1:]  # we don't care about '--'
-            return patterns
-
-    def filter_objects(self, refargs, patterns):
-        files = self.referenced_objects(**refargs) - self.catalog_objects()
-        files_set = set(files)
-        orphans_matched = list(self.orphan_files(patterns))
-        print("pulling:")
-        print(map(lambda x: x[1], orphans_matched))
-        orphans_objects = set(map(lambda x: x[0], orphans_matched))
-        return files_set & orphans_objects
-
-    def cmd_checkout(self, args):
-        self.checkout(show_orphans=True)
-
-    def cmd_gc(self):
-        garbage = self.catalog_objects() - self.referenced_objects()
-        print('Unreferenced objects to remove: %d' % len(garbage))
-        for obj in garbage:
-            fname = os.path.join(self.objdir, obj)
-            print('%10d %s' % (os.stat(fname).st_size, obj))
-            os.remove(fname)
-
-    def can_add_file(self, filename):
-        '''
-        Checks to see if the current file exists in the local repo before filter-clean
-        This method prevents fat from hijacking glob matches that are old
-        TODO: Add a method for explicitly adding glob files
-        '''
-        # If the file doesn't exist in the previous revision, add it
-        showfile = git('show HEAD:{}'.format(filename).split(), stdout=sub.PIPE, stderr=sub.PIPE)
-        if (showfile.wait()):
-            return True
-        # If it is already tracked, add it
-        stream, is_fatfile = self.new_decode(showfile.stdout)
-        return is_fatfile
-
-    def checkconfig(self):
-        '''
-        Returns true if git-fat is already configured
-        '''
-        return gitconfig_get('filter.fat.clean') and gitconfig_get('filter.fat.smudge')
-
-    def cmd_init(self):
-
-        mkdir_p(self.objdir)
-
-        if gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge'):
-            print('Git fat already configured, check configuration in .git/config')
-
-        else:
-            gitconfig_set('filter.fat.clean', 'git-fat filter-clean %f')
-            gitconfig_set('filter.fat.smudge', 'git-fat filter-smudge %f')
-            print('Initialized git fat')
-
-    def gen_large_blobs(self, revs, threshsize):
-        """Build dict of all blobs"""
-        time0 = time.time()
-
-        def hash_only(input, output):
-            """The output of git rev-list --objects shows extra info for blobs, subdirectory trees, and tags.
-            This truncates to one hash per line.
-            """
-            for line in input:
-                output.write(line[:40] + '\n')
-            output.close()
-
-        revlist = git(['rev-list', '--all', '--objects'], stdout=sub.PIPE, bufsize=-1)
-        objcheck = git(['cat-file', '--batch-check'], stdin=sub.PIPE, stdout=sub.PIPE, bufsize=-1)
-
-        hashonly = threading.Thread(target=hash_only, args=(revlist.stdout, objcheck.stdin))
-        hashonly.start()
-        numblobs, numlarge = 0, 1
-        # Build dict with the sizes of all large blobs
-        for line in objcheck.stdout:
-            objhash, blob, size = line.split()
-            if blob != 'blob':
-                continue
-            size = int(size)
-            numblobs += 1
-            if size > threshsize:
-                numlarge += 1
-                yield objhash, size
-        revlist.wait()
-        objcheck.wait()
-        hashonly.join()
-        time1 = time.time()
-        self.verbose('%d of %d blobs are >= %d bytes [elapsed %.3fs]' % (numlarge, numblobs, threshsize, time1-time0))
-
-    def cmd_find(self, args):
-        maxsize = int(args[0])
-        blobsizes = dict(self.gen_large_blobs('--all', maxsize))
-        time0 = time.time()
-        # Find all names assumed by large blobs (those in blobsizes)
-        pathsizes = collections.defaultdict(lambda: set())
-        revlist = git(['rev-list', '--all'], stdout=sub.PIPE, bufsize=-1)
-        cmd = 'diff-tree --root --no-renames --no-commit-id --diff-filter=AMCR -r --stdin -z'.split()
-        difftree = git(cmd, stdin=revlist.stdout, stdout=sub.PIPE)
-        for newblob, modflag, path in difftreez_reader(difftree.stdout):
-            bsize = blobsizes.get(newblob)
-            if bsize:                     # We care about this blob
-                pathsizes[path].add(bsize)
-        time1 = time.time()
-        self.verbose('Found %d paths in %.3f s' % (len(pathsizes), time1-time0))
-        maxlen = max(map(len, pathsizes)) if pathsizes else 0
-
-        sort_func = lambda (p1, s1), (p2, s2): cmp(max(s1), max(s2))
-
-        for path, sizes in sorted(pathsizes.items(), cmp=sort_func, reverse=True):
-            print('%-*s filter=fat -text # %10d %d' % (maxlen, path, max(sizes), len(sizes)))
-
-        revlist.wait()
-        difftree.wait()
-
-#   TODO: Revisit this if/when I feel it's necessary/I want it
-#    def cmd_index_filter(self, args):
-#        manage_gitattributes = '--manage-gitattributes' in args
-#        filelist = set(f.strip() for f in open(args[0]).readlines())
-#        lsfiles = git(['ls-files', '-s'], stdout=sub.PIPE)
-#        updateindex = git(['update-index', '--index-info'], stdin=sub.PIPE)
-#        for line in lsfiles.stdout:
-#            mode, sep, tail = line.partition(' ')
-#            blobhash, sep, tail = tail.partition(' ')
-#            stageno, sep, tail = tail.partition('\t')
-#            filename = tail.strip()
-#            if filename not in filelist:
-#                continue
-#            if mode == "120000":
-#                # skip symbolic links
-#                continue
-#            # This file will contain the hash of the cleaned object
-#            hashfile = os.path.join(self.gitdir, 'fat', 'index-filter', blobhash)
-#            try:
-#                cleanedobj = open(hashfile).read().rstrip()
-#            except IOError:
-#                catfile = git(['cat-file', 'blob', blobhash], stdout=sub.PIPE)
-#                hashobject = git(['hash-object', '-w', '--stdin'], stdin=sub.PIPE, stdout=sub.PIPE)
-#
-#                def dofilter():
-#                    self.filter_clean(catfile.stdout, hashobject.stdin)
-#                    hashobject.stdin.close()
-#
-#                filterclean = threading.Thread(target=dofilter)
-#                filterclean.start()
-#                cleanedobj = hashobject.stdout.read().rstrip()
-#                catfile.wait()
-#                hashobject.wait()
-#                filterclean.join()
-#                mkdir_p(os.path.dirname(hashfile))
-#                open(hashfile, 'w').write(cleanedobj + '\n')
-#            updateindex.stdin.write('%s %s %s\t%s\n' % (mode, cleanedobj, stageno, filename))
-#        if manage_gitattributes:
-#            try:
-#                mode, blobsha1, stageno, filename = sub.check_output(
-#                    ['git', 'ls-files', '-s', '.gitattributes']).split()
-#                gitattributes_lines = sub.check_output(['git', 'cat-file', 'blob', blobsha1]).splitlines()
-#            except ValueError:  # Nothing to unpack, thus no file
-#                mode, stageno = '100644', '0'
-#                gitattributes_lines = []
-#            gitattributes_extra = ['%s filter=fat -text' % line.split()[0] for line in filelist]
-#            hashobject = git(['hash-object', '-w', '--stdin'], stdin=sub.PIPE, stdout=sub.PIPE)
-#            stdout, stderr = hashobject.communicate('\n'.join(gitattributes_lines + gitattributes_extra) + '\n')
-#            updateindex.stdin.write('%s %s %s\t%s\n' % (mode, stdout.strip(), stageno, '.gitattributes'))
-#        updateindex.stdin.close()
-#        lsfiles.wait()
-#        updateindex.wait()
-
 
 if __name__ == '__main__':
     fat = GitFat()
@@ -657,7 +588,7 @@ if __name__ == '__main__':
             cat(sys.stdin, sys.stdout)
     elif cmd == 'filter-smudge':
         verbose_stderr(sys.argv[2])
-        fat.cmd_new_filter_smudge()
+        fat.cmd_filter_smudge()
     elif cmd == 'init':
         fat.cmd_init()
     elif cmd == 'status':
@@ -672,7 +603,5 @@ if __name__ == '__main__':
         fat.cmd_checkout(sys.argv[2:])
     elif cmd == 'find':
         fat.cmd_find(sys.argv[2:])
-#    elif cmd == 'index-filter':
-#        fat.cmd_index_filter(sys.argv[2:])
     else:
         print('Usage: git fat [init|status|push|pull|gc|checkout|find|index-filter]', file=sys.stderr)
