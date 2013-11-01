@@ -223,6 +223,7 @@ class GitFat(object):
         # Put block back
         ret = prepend(block, stream_iter)
         if block.startswith(cookie):
+            assert(len(block) == self.magiclen) # Sanity check
             return ret, True
         return ret, False
 
@@ -277,7 +278,7 @@ class GitFat(object):
         return digest
 
     def filter_clean(self, instream, ostream_toindex):
-        self.verbose("In filter clean")
+        self.verbose("In filter clean for file {}".format(sys.argv[2]))
         
         hasher = hashlib.new('sha1')
         bytes = 0
@@ -330,6 +331,22 @@ class GitFat(object):
         version of the file on stdin and produces the "clean" (repository) version on stdout.
         '''
         self.filter_clean(sys.stdin, sys.stdout)
+
+    def cmd_new_filter_smudge(self):
+        stream, fatfile = self.new_decode(sys.stdin)
+        if fatfile:
+            block = next(stream)  # read the first block
+            digest = block.split()[2]
+            objfile = os.path.join(self.objdir, digest)
+            try:
+                cat(open(objfile), sys.stdout)
+                self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
+            except IOError:
+                self.verbose('git-fat filter-smudge: fat object not found in cache %s' % objfile)
+                sys.stdout.write(block)
+        else:
+            self.verbose('git-fat filter-smudge: not a managed file')
+            cat_iter(stream, sys.stdout)
 
     def cmd_filter_smudge(self):
         result, bytes = self.decode_stream(sys.stdin)
@@ -491,36 +508,16 @@ class GitFat(object):
     def can_add_file(self, filename):
         '''
         Checks to see if the current file exists in the local repo before filter-clean
-        If it exists, check the filesize
-        if the filesize is not magiclen, return false
-        git hash-object <filename> | xargs git cat-file -s
-        [size]
+        This method prevents fat from hijacking glob matches that are old
+        TODO: Add a method for explicitly adding glob files
         '''
-        # TODO: check if running this after git-fat init but before git-fat pull is harmful
-        self.verbose("Hashing {}".format(filename))
-        hashed = git('hash-object --no-filters'.split() + [filename], stdout=sub.PIPE).stdout.read().strip()
-        self.verbose("Hash of {} is {}".format(filename, hashed))
-        getsize = git('cat-file -s {}'.format(hashed).split(), stdout=sub.PIPE, stderr=sub.PIPE)
-        # If the subprocess returns non-zero, then it's not in our repo
-        #   (unless someone manually added it to .git/objects)
-        if (getsize.wait()):
-            self.verbose(getsize.stderr.read())
-            return True
-
+        # If the file doesn't exist in the previous revision, add it
         showfile = git('show HEAD:{}'.format(filename).split(), stdout=sub.PIPE)
-
-        # TODO: Don't actually do this.  Just for testing
         if (showfile.wait()):
             return True
-        try:
-            digest, bytes = self.decode_stream(showfile.stdout)
-        except IOError:
-            return False
-
-        if isinstance(digest, str):
-            return True
-        else:
-            return False
+        # If it is already tracked, add it
+        stream, is_fatfile = self.new_decode(showfile.stdout)
+        return is_fatfile
 
     def checkconfig(self):
         '''
@@ -658,13 +655,15 @@ if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     # If we're not configured and they're not calling init
     if not fat.checkconfig() and not cmd == 'init':
-        sys.stderr.write("git-fat not configured. First run git fat init\n")
+        sys.stderr.write("git-fat not configured. First run: git fat init\n")
         sys.exit(1)
     if cmd == 'filter-clean':
-        verbose_stderr(sys.argv[2])
         if fat.can_add_file(sys.argv[2]):
             fat.cmd_filter_clean()
         else:
+            verbose_stderr(
+                "Not adding {} as it is not a new file and is not managed by git-fat".format(sys.argv[2])
+            )
             cat(sys.stdin, sys.stdout)
     elif cmd == 'filter-smudge':
         verbose_stderr(sys.argv[2])
