@@ -81,13 +81,17 @@ def readblocks(stream):
     '''
     Reads BLOCK_SIZE from stream and yields it
     '''
-    bytes = 0
     while True:
         data = stream.read(BLOCK_SIZE)
-        bytes += len(data)
         if not data:
             break
         yield data
+
+
+def prepend(block, iterator):
+    yield block
+    for i in iterator:
+        yield i
 
 
 def cat_iter(initer, outstream):
@@ -210,14 +214,17 @@ class GitFat(object):
 
     def new_decode(self, stream):
         '''
-        Returns stream object and true if stream is git-fat file
+        Returns iterator and True if stream is git-fat object
         '''
         cookie = '#$# git-fat '
-        block = stream.read(self.magiclen)
-        stream.seek(0,0)
+        stream_iter = readblocks(stream)
+        # Read block for check
+        block = next(stream_iter)
+        # Put block back
+        ret = prepend(block, stream_iter)
         if block.startswith(cookie):
-            return stream, True
-        return stream, False
+            return ret, True
+        return ret, False
 
     def decode(self, block, noraise=False):
         cookie = '#$# git-fat '
@@ -269,33 +276,26 @@ class GitFat(object):
         digest, bytes = self.decode(body, noraise=True)
         return digest
 
-    def filter_clean(self, instream, oustream_toindex):
+    def filter_clean(self, instream, ostream_toindex):
         self.verbose("In filter clean")
         
         hasher = hashlib.new('sha1')
         bytes = 0
         fd, tmpname = tempfile.mkstemp(dir=self.objdir)
+        cached = False
 
         try:
-            # when already_clean == True, the working copy matches local repository (already clean)
-            already_clean = False
+            blockiter, is_clean = self.new_decode(instream)
+
             # Changes to True when file exists in .git/fat/objects
-            cached = False
             # Open the temporary file for writing
-            ostream = os.fdopen(fd, 'w')
+            ostream = ostream_toindex
 
-            firstblock = True
-            for block in readblocks(instream):
+            # if it's not a git-fat placeholder file, cache it
+            if not is_clean:
+                ostream = os.fdopen(fd, 'w')
 
-                if firstblock:
-                    if len(block) == self.magiclen and self.decode_clean(block[0:self.magiclen]):
-                        already_clean = True
-                        # Prevent writing of duplicate fatfile
-                        # write clean file to index
-                        ostream.close()
-                        ostream = oustream_toindex
-                    firstblock = False
-
+            for block in blockiter:
                 # Add the block to be hashed
                 hasher.update(block)
                 bytes += len(block)
@@ -306,7 +306,7 @@ class GitFat(object):
             objfile = os.path.join(self.objdir, digest)
 
             # Create placeholder for the file
-            if not already_clean:
+            if not is_clean:
                 # Close temporary file
                 ostream.close()
                 if os.path.exists(objfile):
@@ -318,7 +318,8 @@ class GitFat(object):
                     os.rename(tmpname, objfile)
                     self.verbose('git-fat filter-clean: caching to %s' % objfile)
                 cached = True
-                oustream_toindex.write(self.encode(digest, bytes))
+                # Write placeholder to index
+                ostream_toindex.write(self.encode(digest, bytes))
         finally:
             if not cached:
                 os.remove(tmpname)
