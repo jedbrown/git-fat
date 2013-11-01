@@ -223,7 +223,7 @@ class GitFat(object):
         # Put block back
         ret = prepend(block, stream_iter)
         if block.startswith(cookie):
-            assert(len(block) == self.magiclen) # Sanity check
+            assert(len(block) == self.magiclen)  # Sanity check
             return ret, True
         return ret, False
 
@@ -267,19 +267,9 @@ class GitFat(object):
         else:
             return None, bytes
 
-    def decode_clean(self, body):
-        '''
-        Attempt to decode version in working tree. The tree version could be changed to have a more
-        useful message than the machine-readable copy that goes into the repository. If the tree
-        version decodes successfully, it indicates that the fat data is not currently available in
-        this repository.
-        '''
-        digest, bytes = self.decode(body, noraise=True)
-        return digest
-
     def filter_clean(self, instream, ostream_toindex):
+
         self.verbose("In filter clean for file {}".format(sys.argv[2]))
-        
         hasher = hashlib.new('sha1')
         bytes = 0
         fd, tmpname = tempfile.mkstemp(dir=self.objdir)
@@ -512,7 +502,7 @@ class GitFat(object):
         TODO: Add a method for explicitly adding glob files
         '''
         # If the file doesn't exist in the previous revision, add it
-        showfile = git('show HEAD:{}'.format(filename).split(), stdout=sub.PIPE)
+        showfile = git('show HEAD:{}'.format(filename).split(), stdout=sub.PIPE, stderr=sub.PIPE)
         if (showfile.wait()):
             return True
         # If it is already tracked, add it
@@ -667,7 +657,7 @@ if __name__ == '__main__':
             cat(sys.stdin, sys.stdout)
     elif cmd == 'filter-smudge':
         verbose_stderr(sys.argv[2])
-        fat.cmd_filter_smudge()
+        fat.cmd_new_filter_smudge()
     elif cmd == 'init':
         fat.cmd_init()
     elif cmd == 'status':
