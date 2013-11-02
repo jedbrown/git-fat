@@ -272,21 +272,23 @@ class GitFat(object):
 
     def referenced_objects(self, rev=None, all=False):
         referenced = set()
+
+        rev = rev or self.revparse('HEAD')
+        # override rev if all is set
         if all:
             rev = '--all'
-        elif rev is None:
-            rev = self.revparse('HEAD')
 
-        p1 = git(['rev-list', '--objects', rev], stdout=sub.PIPE)
-        p2 = git(['cat-file', '--batch-check'], stdin=sub.PIPE, stdout=sub.PIPE)
+        revlist = git(['rev-list', '--objects', rev], stdout=sub.PIPE)
+        awk = sub.Popen(['awk', "{print $1}"], stdin=revlist.stdout, stdout=sub.PIPE)
+        catfile = git(['cat-file', '--batch-check'], stdin=awk.stdout, stdout=sub.PIPE)
 
-        def cut_sha1hash(input, output):
-            for line in input:
-                output.write(line.split()[0] + '\n')
-            output.close()
-        cut_thread = threading.Thread(target=cut_sha1hash, args=(p1.stdout, p2.stdin))
-        cut_thread.start()
-        for line in p2.stdout:
+        #def cut_sha1hash(input, output):
+        #    for line in input:
+        #        output.write(line.split()[0] + '\n')
+        #    output.close()
+        #cut_thread = threading.Thread(target=cut_sha1hash, args=(revlist.stdout, catfile.stdin))
+        #cut_thread.start()
+        for line in catfile.stdout:
             objhash, objtype, size = line.split()
             if objtype == 'blob' and int(size) in self.magiclens:
                 try:
@@ -294,19 +296,25 @@ class GitFat(object):
                     referenced.add(fathash)
                 except GitFat.DecodeError:
                     pass
-        cut_thread.join()
-        p1.wait()
-        p2.wait()
+        #cut_thread.join()
+        revlist.wait()
+        awk.wait()
+        catfile.wait()
         return referenced
 
     def orphan_files(self, patterns=[]):
         '''
-        generator for all orphan placeholders in the working tree
+        generator for all placeholders in the working tree
         '''
         for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
-            digest = self.decode_file(fname)[0]
-            if digest:
-                yield (digest, fname)
+            stat = os.lstat(fname)
+            if stat.st_size != self.magiclen or os.path.islink(fname):
+                continue
+            with open(fname) as f:
+                stream, fatfile = self.new_decode(f)
+                if fatfile:
+                    block = next(stream)  # read the first block
+                    yield (block.split()[2], fname)
 
     def checkout(self, show_orphans=False):
         '''
@@ -533,13 +541,11 @@ class GitFat(object):
 
     def status(self, args):
         catalog = self.catalog_objects()
-        refargs = dict()
-        if '--all' in args:
-            refargs['all'] = True
-        referenced = self.referenced_objects(**refargs)
+        all = '--all' in args
+        referenced = self.referenced_objects(all=all)
         garbage = catalog - referenced
         orphans = referenced - catalog
-        if '--all' in args:
+        if all:
             for obj in referenced:
                 print(obj)
         if orphans:
