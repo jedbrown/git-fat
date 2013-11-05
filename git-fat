@@ -219,6 +219,9 @@ class GitFat(object):
         return set(os.listdir(self.objdir))
 
     def _referenced_objects(self, rev=None, all=False):
+        '''
+        Return just the hashes of the files that are referenced in the repository
+        '''
         rev = rev or 'HEAD'
         # override rev if all is set
         if all:
@@ -357,7 +360,6 @@ class GitFat(object):
         try:
             blockiter, is_clean = self._decode(instream)
 
-            # Changes to True when file exists in .git/fat/objects
             # Open the temporary file for writing
             ostream = ostream_toindex
 
@@ -411,7 +413,7 @@ class GitFat(object):
         if files:
             print("Pulling: ", list(files))
             cmd = self._rsync(push=False)
-            self.verbose('Executing: %s' % ' '.join(cmd))
+            self.verbose('Executing: {}'.format(cmd.upper()))
             p = sub.Popen(cmd, stdin=sub.PIPE)
             p.communicate(input='\x00'.join(files))
         else:
@@ -427,7 +429,7 @@ class GitFat(object):
         # (includes history). Finer-grained pushing would be useful.
         files = self._referenced_objects(all=pushall) & self._cached_objects()
         rsync = self._rsync(push=True)
-        self.verbose('Executing: %s' % ' '.join(cmd))
+        self.verbose('Executing: {}'.format(cmd.upper()))
         p = sub.Popen(rsync, stdin=sub.PIPE)
         p.communicate(input='\x00'.join(files))
 
@@ -466,11 +468,11 @@ class GitFat(object):
         if orphans:
             print('Orphan objects:')
             for orph in orphans:
-                print('    ' + orph)
+                print('\t' + orph)
         if garbage:
             print('Garbage objects:')
             for g in garbage:
-                print('    ' + g)
+                print('\t' + g)
 
 if __name__ == '__main__':
     fat = GitFat()
