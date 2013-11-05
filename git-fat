@@ -12,6 +12,7 @@ import itertools
 import threading
 import time
 import collections
+from multiprocessing import Process, Manager
 
 try:
     from subprocess import check_output
@@ -96,31 +97,6 @@ def cat_iter(initer, outstream):
 
 def cat(instream, outstream):
     return cat_iter(readblocks(instream), outstream)
-
-
-def difftreez_reader(input):
-    '''
-    Incremental reader for git diff-tree -z output
-    :oldmode newmode oldsha1 newsha1 modflag\0filename\0:oldmode newmode ...
-    '''
-    buffer = []
-    partial = ''
-    while True:
-        newread = input.read(BLOCK_SIZE)
-        if not newread:
-            break
-        partial += newread
-        while True:
-            head, sep, partial = partial.partition('\0')
-            if not sep:
-                partial = head
-                break
-            buffer.append(head)
-            if len(buffer) == 2:
-                oldmode, newmode, oldhash, newhash, modflag = buffer[0].split()
-                path = buffer[1]
-                yield (newhash, modflag, path)
-                buffer = []
 
 
 def gitconfig_get(name, file=None):
@@ -243,79 +219,49 @@ class GitFat(object):
         return set(os.listdir(self.objdir))
 
     def _referenced_objects(self, rev=None, all=False):
-        '''
-        Return all the referenced objects in the tree-ish rev or HEAD
-        '''
-        referenced = set()
-
         rev = rev or 'HEAD'
         # override rev if all is set
         if all:
             rev = '--all'
 
-        revlist = git(['rev-list', '--objects', rev], stdout=sub.PIPE)
-        # I could probably do something better than awk here
-        awk = sub.Popen(['awk', "{print $1}"], stdin=revlist.stdout, stdout=sub.PIPE)
-        catfile = git(['cat-file', '--batch-check'], stdin=awk.stdout, stdout=sub.PIPE)
-
-        for line in catfile.stdout:
-            self.verbose(line[:-1])
-            objhash, objtype, size = line.split()
-            if objtype == 'blob' and int(size) in self.magiclens:
-                readfile = git(['cat-file', '-p', objhash], stdout=sub.PIPE)
-                digest = self._get_digest(readfile.stdout)
-                if digest:
-                    referenced.add(digest)
-
-        revlist.wait()
-        awk.wait()
-        catfile.wait()
-        self.verbose(referenced)
-        return referenced
+        objs_dict = self._managed_files(rev=rev)
+        return set(objs_dict.keys())
 
     def _managed_files(self, rev=None, working=False):
-        managed = set()
+        '''
+        Finds managed files in the specified revision
+        '''
+        # TODO: Liberally comment this code
 
         rev = rev or 'HEAD'
+        args = ['--no-walk', rev] if working else [rev]
 
-        if working:
-            revlist = git('rev-list --objects --no-walk {}'.format(rev).split(), stdout=sub.PIPE)
-        else:
-            revlist = git('rev-list --objects {}'.format(rev).split(), stdout=sub.PIPE)
+        revlist = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
+        awk = sub.Popen(['awk', '{print $1}'], stdin=revlist.stdout, stdout=sub.PIPE)
+        catfile = git('cat-file --batch-check'.split(), stdin=awk.stdout, stdout=sub.PIPE)
 
-        retcode = revlist.wait()
-        if retcode:
-            sys.exit(retcode)
-
-        ref_dict = dict()
-        for line in revlist.stdout:
-            hashobj = line.split()
-            if len(hashobj) == 2:
-                # Store obj -> filename mapping
-                ref_dict[hashobj[0]] = hashobj[1]
-
-        catfile = git('cat-file --batch-check'.split(), stdin=sub.PIPE, stdout=sub.PIPE)
-        output = catfile.communicate(input="\n".join(ref_dict.keys()))[0]
-        retcode = catfile.wait()
-        if retcode:
-            sys.exit(retcode)
-
-        for line in output.splitlines():
-            self.verbose(line)
+        managed = {}
+        for line in catfile.stdout:
             objhash, objtype, size = line.split()
             if objtype == 'blob' and int(size) in self.magiclens:
                 readfile = git(['cat-file', '-p', objhash], stdout=sub.PIPE)
                 digest = self._get_digest(readfile.stdout)
                 if digest:
-                    managed.add(objhash)
+                    managed[objhash] = digest
 
-        ret = [ (m, ref_dict[m]) for m in managed ]
+        catfile.wait()
+
+        filedict = {}
+        revlist2 = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
+        for line in revlist2.stdout:
+            hashobj = line.split()
+            if len(hashobj) == 2:
+                if hashobj[0] in managed.keys():
+                    filedict[hashobj[0]] = hashobj[1]
+        revlist2.wait()
+
+        ret = dict((j, filedict[i]) for i,j in managed.iteritems())
         return ret
-
-    def list_files(self, rev=None, working=False):
-        
-        for f in self._managed_files(rev=rev, working=working):
-            print(f)
 
     def _orphan_files(self, patterns=[]):
         '''
@@ -330,6 +276,11 @@ class GitFat(object):
                 digest = self._get_digest(f)
                 if digest:
                     yield (digest, fname)
+
+    def list_files(self, rev=None, working=False):
+        managed = self._managed_files(rev=rev, working=working)
+        for f in managed.keys():
+            print(f, managed.get(f))
 
     def checkout(self, show_orphans=False):
         '''
@@ -457,11 +408,14 @@ class GitFat(object):
             # default pull any object referenced but not stored
             files = self._referenced_objects(rev=revision) - cached_objs
 
-        print("Pulling: ", list(files))
-        cmd = self._rsync(push=False)
-        self.verbose('Executing: %s' % ' '.join(cmd))
-        p = sub.Popen(cmd, stdin=sub.PIPE)
-        p.communicate(input='\x00'.join(files))
+        if files:
+            print("Pulling: ", list(files))
+            cmd = self._rsync(push=False)
+            self.verbose('Executing: %s' % ' '.join(cmd))
+            p = sub.Popen(cmd, stdin=sub.PIPE)
+            p.communicate(input='\x00'.join(files))
+        else:
+            print("You've got everything! d(^_^)b")
 
         self.checkout()
 
