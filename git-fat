@@ -267,7 +267,10 @@ class GitFat(object):
         revlist2 = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
         for line in revlist2.stdout:
             hashobj = line.split()
+            # Revlist prints all objects (commits, trees, blobs) but blobs have the file path
+            # next to the git objecthash
             if len(hashobj) == 2:
+                # If the object is one we're managing
                 if hashobj[0] in managed.keys():
                     filedict[hashobj[0]] = hashobj[1]
         revlist2.wait()
@@ -324,13 +327,13 @@ class GitFat(object):
         cached = False
 
         try:
-            blockiter, is_clean = self._decode(instream)
+            blockiter, is_placeholder = self._decode(instream)
 
             # Open the temporary file for writing
             ostream = outstream
 
             # if it's not a git-fat placeholder file, cache it
-            if not is_clean:
+            if not is_placeholder:
                 ostream = os.fdopen(fd, 'w')
 
             for block in blockiter:
@@ -344,7 +347,7 @@ class GitFat(object):
             objfile = os.path.join(self.objdir, digest)
 
             # Create placeholder for the file
-            if not is_clean:
+            if not is_placeholder:
                 # Close temporary file
                 ostream.close()
                 if os.path.exists(objfile):
@@ -364,7 +367,7 @@ class GitFat(object):
                 os.remove(tmpname)
 
     def filter_clean(self, cur_file, **kwargs):
-        if self.can_add_file(cur_file):
+        if self.can_clean_file(cur_file):
             self._filter_clean(sys.stdin, sys.stdout)
         else:
             verbose_stderr(
@@ -401,12 +404,12 @@ class GitFat(object):
             elif show_orphans:
                 print('Data unavailable: %s %s' % (digest, fname))
 
-    def can_add_file(self, filename):
+    def can_clean_file(self, filename):
         '''
         Checks to see if the current file exists in the local repo before filter-clean
         This method prevents fat from hijacking glob matches that are old
         '''
-        # If the file doesn't exist in the previous revision, add it
+        # If the file doesn't exist in the immediately previous revision, add it
         showfile = git('show HEAD:{}'.format(filename).split(), stdout=sub.PIPE, stderr=sub.PIPE)
         if (showfile.wait()):
             return True
@@ -512,11 +515,11 @@ if __name__ == '__main__':
     parser_init = subparser.add_parser('init', help='Initialize git-fat')
     parser_init.set_defaults(func=fat.init)
 
-    parser_filter_clean = subparser.add_parser('filter-clean', help='filter-clean to be called by git')
+    parser_filter_clean = subparser.add_parser('filter-clean', help='filter-clean to be called only by git')
     parser_filter_clean.add_argument("cur_file")
     parser_filter_clean.set_defaults(func=fat.filter_clean)
 
-    parser_filter_smudge = subparser.add_parser('filter-smudge', help='filter-smudge to be called by git')
+    parser_filter_smudge = subparser.add_parser('filter-smudge', help='filter-smudge to be called only by git')
     parser_filter_smudge.add_argument("cur_file")  # Currently unused
     parser_filter_smudge.set_defaults(func=fat.filter_smudge)
 
