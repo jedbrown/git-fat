@@ -14,6 +14,7 @@ import threading
 import time
 import collections
 from multiprocessing import Process, Manager
+from datetime import datetime as dt
 
 try:
     from subprocess import check_output
@@ -124,7 +125,6 @@ def gitconfig_set(name, value, file=None):
 class GitFat(object):
 
     def __init__(self):
-
         self.verbose = verbose_stderr if os.environ.get('GIT_FAT_VERBOSE') else verbose_ignore
         try:
             self.gitroot = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
@@ -147,6 +147,9 @@ class GitFat(object):
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]]  # All prior versions
 
     def _rsync_opts(self):
+        '''
+        Read rsync options from config
+        '''
         remote = gitconfig_get('rsync.remote', file=self.cfgpath)
         ssh_port = gitconfig_get('rsync.sshport', file=self.cfgpath)
         ssh_user = gitconfig_get('rsync.sshuser', file=self.cfgpath)
@@ -155,6 +158,9 @@ class GitFat(object):
         return remote, ssh_port, ssh_user
 
     def _rsync(self, push):
+        '''
+        Construct the rsync command
+        '''
         (remote, ssh_port, ssh_user) = self._rsync_opts()
         if push:
             self.verbose('Pushing to %s' % (remote))
@@ -238,7 +244,7 @@ class GitFat(object):
 
         # Get all the git objects in the current revision and in history if --all is specified
         revlist = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
-        # Grab only the first column.  Tried doing this in python but because of the way that 
+        # Grab only the first column.  Tried doing this in python but because of the way that
         # subprocess.PIPE buffering works, I was running into memory issues with larger repositories
         # plugging pipes to other subprocesses appears to not have the memory buffer issue
         awk = sub.Popen(['awk', '{print $1}'], stdin=revlist.stdout, stdout=sub.PIPE)
@@ -285,6 +291,7 @@ class GitFat(object):
         generator for placeholders in working tree that match pattern
         '''
         # Null-terminated for proper file name handling
+        sys.stderr.write('In orphan_files\n')
         for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
             stat = os.lstat(fname)
             if stat.st_size != self.magiclen or os.path.islink(fname):
@@ -299,6 +306,7 @@ class GitFat(object):
         The smudge filter runs whenever a file is being checked out into the working copy of the tree
         instream is sys.stdin and outstream is sys.stdout when it is called by git
         '''
+        sys.stderr.write('In filter_smudge\n')
         stream, fatfile = self._decode(instream)
         if fatfile:
             block = next(stream)  # read the first block
@@ -367,6 +375,9 @@ class GitFat(object):
                 os.remove(tmpname)
 
     def filter_clean(self, cur_file, **kwargs):
+        '''
+        Public command to do the clean (should only be called by git)
+        '''
         if self.can_clean_file(cur_file):
             self._filter_clean(sys.stdin, sys.stdout)
         else:
@@ -377,9 +388,15 @@ class GitFat(object):
             cat(sys.stdin, sys.stdout)
 
     def filter_smudge(self, **kwargs):
+        '''
+        Public command to do the smudge (should only be called by git)
+        '''
         self._filter_smudge(sys.stdin, sys.stdout)
 
     def list_files(self, **kwargs):
+        '''
+        Command to list the files by fat-digest -> gitroot relative path
+        '''
         managed = self._managed_files(**kwargs)
         for f in managed.keys():
             print(f, managed.get(f))
@@ -395,10 +412,18 @@ class GitFat(object):
                 # The output of our smudge filter depends on the existence of
                 # the file in .git/fat/objects, but git caches the file stat
                 # from the previous time the file was smudged, therefore it
-                # won't try to re-smudge. I don't know a git command that
-                # specifically invalidates that cache, but touching the file
-                # also does the trick.
-                os.utime(fname, None)
+                # won't try to re-smudge. There's no git command to specifically
+                # invalidate the index cache so we have two options:
+                # Change the file stat mtime or change the file size. However, since
+                # the file mtime only has a granularity of 1s, if we're doing a pull
+                # right after a clone or checkout, it's possible that the modified
+                # time will be the same as in the index. Git knows this can happen
+                # so git checks the file size if the modified time is the same.
+                # The easiest way around this is just to remove the file we want
+                # to replace (since it's an orphan, it should be a placeholder)
+                with open(fname,'r') as f:
+                    if self._get_digest(f):  # One last sanity check
+                        os.remove(fname)
                 # This re-smudge is essentially a copy that restores permissions.
                 sub.check_call(['git', 'checkout-index', '--index', '--force', fname])
             elif show_orphans:
@@ -428,6 +453,7 @@ class GitFat(object):
         Pull anything that I have referenced, but not stored
         '''
         cached_objs = self._cached_objects()
+        sys.stderr.write(str(cached_objs)+'\n')
         if pattern:
             # filter the working tree by a pattern
             files = set(digest for digest, fname in self._orphan_files(patterns=[pattern])) - cached_objs
@@ -439,7 +465,7 @@ class GitFat(object):
             print("Pulling: ", list(files))
             rsync = self._rsync(push=False)
             self.verbose('Executing: {}'.format(rsync))
-            p = sub.Popen(rsync, stdin=sub.PIPE)
+            p = sub.Popen(rsync, stdin=sub.PIPE, preexec_fn=os.setsid)
             p.communicate(input='\x00'.join(files))
         else:
             print("You've got everything! d(^_^)b")
@@ -530,15 +556,18 @@ if __name__ == '__main__':
     parser_pull.add_argument("pattern", nargs="?", help='pull only files matching pattern')
     parser_pull.set_defaults(func=fat.pull)
 
+    parser_checkout = subparser.add_parser('checkout', help='resmudge all orphan objects')
+    parser_checkout.set_defaults(func=fat.checkout)
+
     parser_status = subparser.add_parser('status', help='print orphan and garbage objects')
     parser_status.set_defaults(func=fat.status)
-    
+
     parser_list = subparser.add_parser('list', help='list all files managed by git-fat')
     parser_list.set_defaults(func=fat.list_files)
 
     parser_gc = subparser.add_parser('gc', help='remove all garbage files in cache (files without placeholders)')
     parser_gc.set_defaults(func=fat.gc)
-    
+
     args = parser.parse_args()
 
     if not fat.checkconfig() and args.func != fat.init:
