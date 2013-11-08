@@ -3,18 +3,11 @@
 
 from __future__ import print_function, with_statement
 
-import sys
 import hashlib
-import tempfile
 import os
 import subprocess as sub
-from subprocess import CalledProcessError
-import itertools
-import threading
-import time
-import collections
-from multiprocessing import Process, Manager
-from datetime import datetime as dt
+import sys
+import tempfile
 
 try:
     from subprocess import check_output
@@ -52,11 +45,11 @@ def git(cliargs, *args, **kwargs):
     return sub.Popen(['git'] + cliargs, *args, **kwargs)
 
 
-def verbose_stderr(*args, **kwargs):
+def debug(*args, **kwargs):
     return print(*args, file=sys.stderr, **kwargs)
 
 
-def verbose_ignore(*args, **kwargs):
+def empty(*args, **kwargs):
     pass
 
 
@@ -89,7 +82,6 @@ def readblocks(stream):
         if not data:
             break
         yield data
-
 
 
 def cat_iter(initer, outstream):
@@ -125,16 +117,6 @@ def gitconfig_set(name, value, file=None):
 class GitFat(object):
 
     def __init__(self):
-        self.verbose = verbose_stderr if os.environ.get('GIT_FAT_VERBOSE') else verbose_ignore
-        try:
-            self.gitroot = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
-        except sub.CalledProcessError:
-            sys.stderr.write('git-fat must be run from a git directory\n')
-            sys.exit(1)
-        self.gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
-        self.objdir = os.path.join(self.gitdir, 'fat', 'objects')
-        self.cfgpath = os.path.join(self.gitroot, (gitconfig_get('gitfat.config') or '.gitfat'))
-
         if os.environ.get('GIT_FAT_VERSION') == '1':
             self.encode = self.encode_v1
         else:
@@ -146,15 +128,55 @@ class GitFat(object):
         self.magiclen = magiclen(self.encode)  # Current version
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]]  # All prior versions
 
+    def configure(self, verbose=False, **kwargs):
+        '''
+        Configure git-fat for usage: variables, environment
+        '''
+
+        # Setup Variables
+        try:
+            self.gitroot = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
+            self.gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
+        except sub.CalledProcessError:
+            print('git-fat must be run from a git directory', file=sys.stderr)
+            sys.exit(1)
+
+        self.objdir = os.path.join(self.gitdir, 'fat', 'objects')
+        self.cfgpath = os.path.join(self.gitroot, '.gitfat')
+
+        self.verbose = debug if verbose else empty
+
+        if not self._configured():
+            print('Setting filters in .git/config')
+            gitconfig_set('filter.fat.clean', 'git-fat filter-clean %f')
+            gitconfig_set('filter.fat.smudge', 'git-fat filter-smudge %f')
+            print('Creating .git/fat/objects')
+            mkdir_p(self.objdir)
+            print('Initialized git-fat')
+
+    def _configured(self):
+        '''
+        Returns true if git-fat is already configured
+        '''
+        reqs = os.path.isdir(self.objdir)
+        filters = gitconfig_get('filter.fat.clean') and gitconfig_get('filter.fat.smudge')
+        return filters and reqs
+
     def _rsync_opts(self):
         '''
         Read rsync options from config
         '''
+        if not os.path.isfile(self.cfgpath):
+            print('git-fat requires that .gitfat is present to use rsync remotes', file=sys.stderr)
+            sys.exit(1)
+
         remote = gitconfig_get('rsync.remote', file=self.cfgpath)
+        if not remote:
+            print('No rsync.remote in {}'.format(self.cfgpath), file=sys.stderr)
+            sys.exit(1)
+
         ssh_port = gitconfig_get('rsync.sshport', file=self.cfgpath)
         ssh_user = gitconfig_get('rsync.sshuser', file=self.cfgpath)
-        if remote is None:
-            raise RuntimeError('No rsync.remote in %s' % self.cfgpath)
         return remote, ssh_port, ssh_user
 
     def _rsync(self, push):
@@ -283,7 +305,7 @@ class GitFat(object):
 
         # return a dict(git-fat hash -> filename)
         # git's objhash are the keys in `managed` and `filedict`
-        ret = dict((j, filedict[i]) for i,j in managed.iteritems())
+        ret = dict((j, filedict[i]) for i, j in managed.iteritems())
         return ret
 
     def _orphan_files(self, patterns=[]):
@@ -291,7 +313,6 @@ class GitFat(object):
         generator for placeholders in working tree that match pattern
         '''
         # Null-terminated for proper file name handling
-        sys.stderr.write('In orphan_files\n')
         for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
             stat = os.lstat(fname)
             if stat.st_size != self.magiclen or os.path.islink(fname):
@@ -306,14 +327,14 @@ class GitFat(object):
         The smudge filter runs whenever a file is being checked out into the working copy of the tree
         instream is sys.stdin and outstream is sys.stdout when it is called by git
         '''
-        sys.stderr.write('In filter_smudge\n')
         stream, fatfile = self._decode(instream)
         if fatfile:
             block = next(stream)  # read the first block
             digest = block.split()[2]
             objfile = os.path.join(self.objdir, digest)
             try:
-                cat(open(objfile), outstream)
+                with open(objfile) as f:
+                    cat(f, outstream)
                 self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
             except IOError:
                 self.verbose('git-fat filter-smudge: fat object not found in cache %s' % objfile)
@@ -328,7 +349,6 @@ class GitFat(object):
         version of the file on stdin and produces the "clean" (repository) version on stdout.
         '''
 
-        self.verbose("In filter clean for file {}".format(sys.argv[2]))
         hasher = hashlib.new('sha1')
         bytes = 0
         fd, tmpname = tempfile.mkstemp(dir=self.objdir)
@@ -381,7 +401,7 @@ class GitFat(object):
         if self.can_clean_file(cur_file):
             self._filter_clean(sys.stdin, sys.stdout)
         else:
-            verbose_stderr(
+            self.verbose(
                 "Not adding: {}\n".format(cur_file) +
                 "It is not a new file and is not managed by git-fat"
             )
@@ -421,7 +441,7 @@ class GitFat(object):
                 # so git checks the file size if the modified time is the same.
                 # The easiest way around this is just to remove the file we want
                 # to replace (since it's an orphan, it should be a placeholder)
-                with open(fname,'r') as f:
+                with open(fname, 'r') as f:
                     if self._get_digest(f):  # One last sanity check
                         os.remove(fname)
                 # This re-smudge is essentially a copy that restores permissions.
@@ -442,18 +462,11 @@ class GitFat(object):
         stream, is_fatfile = self._decode(showfile.stdout)
         return is_fatfile
 
-    def checkconfig(self):
-        '''
-        Returns true if git-fat is already configured
-        '''
-        return gitconfig_get('filter.fat.clean') and gitconfig_get('filter.fat.smudge')
-
     def pull(self, pattern=None, **kwargs):
         '''
         Pull anything that I have referenced, but not stored
         '''
         cached_objs = self._cached_objects()
-        sys.stderr.write(str(cached_objs)+'\n')
         if pattern:
             # filter the working tree by a pattern
             files = set(digest for digest, fname in self._orphan_files(patterns=[pattern])) - cached_objs
@@ -476,38 +489,11 @@ class GitFat(object):
         '''
         Push anything that I have stored and referenced (rsync doesn't push if exists on remote)
         '''
-        # Default to push only those objects referenced by current HEAD
-        # (includes history). Finer-grained pushing would be useful.
         files = self._referenced_objects(**kwargs) & self._cached_objects()
         rsync = self._rsync(push=True)
         self.verbose('Executing: {}'.format(rsync))
         p = sub.Popen(rsync, stdin=sub.PIPE)
         p.communicate(input='\x00'.join(files))
-
-    def init(self, **kwargs):
-        '''
-        Create cache directory and setup filters in .git/config
-        '''
-        mkdir_p(self.objdir)
-        gitconfig_set('filter.fat.clean', 'git-fat filter-clean %f')
-        gitconfig_set('filter.fat.smudge', 'git-fat filter-smudge %f')
-        print('Initialized git fat')
-
-    def gc(self, **kwargs):
-        '''
-        Remove any objects that aren't referenced in the tree
-        '''
-        # Make sure user doesn't accidently delete something they didn't mean to
-        if not kwargs.get("full_history"):
-            kwargs.update({"full_history":True})
-
-        garbage = self._cached_objects() - self._referenced_objects(**kwargs)
-
-        print('Unreferenced objects to remove: %d' % len(garbage))
-        for obj in garbage:
-            fname = os.path.join(self.objdir, obj)
-            print('%10d %s' % (os.stat(fname).st_size, obj))
-            os.remove(fname)
 
     def status(self, **kwargs):
         '''
@@ -538,8 +524,13 @@ if __name__ == '__main__':
     parser.add_argument('-a', "--full-history", dest='full_history', action='store_true',
         help='Look for git-fat placeholder files in the entire history instead of just the working copy')
 
+    parser.add_argument('-v', "--verbose", dest='verbose', action='store_true',
+        help='Verbose output')
+
+    # Empty function for legacy api; config gets called every time
+    # (assuming if user is calling git-fat they want it configured)
     parser_init = subparser.add_parser('init', help='Initialize git-fat')
-    parser_init.set_defaults(func=fat.init)
+    parser_init.set_defaults(func=empty)
 
     parser_filter_clean = subparser.add_parser('filter-clean', help='filter-clean to be called only by git')
     parser_filter_clean.add_argument("cur_file")
@@ -565,17 +556,15 @@ if __name__ == '__main__':
     parser_list = subparser.add_parser('list', help='list all files managed by git-fat')
     parser_list.set_defaults(func=fat.list_files)
 
-    parser_gc = subparser.add_parser('gc', help='remove all garbage files in cache (files without placeholders)')
-    parser_gc.set_defaults(func=fat.gc)
-
     args = parser.parse_args()
-
-    if not fat.checkconfig() and args.func != fat.init:
-        sys.stderr.write("Git fat not configured, first run: git fat init\n")
-        sys.exit(1)
 
     kwargs = dict(vars(args))
     del kwargs['func']
 
-    args.func(**kwargs)
+    # First configure git-fat
+    fat.configure(**kwargs)
 
+    # don't need this after configuring, breaks functions
+    del kwargs['verbose']
+    # Then execute function
+    args.func(**kwargs)
