@@ -1,2 +1,3 @@
 #!/usr/bin/env bash
-coverage run -p $@
+COV=${COVERAGE:-coverage}
+$COV run -p $@
