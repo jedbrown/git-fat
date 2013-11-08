@@ -1,9 +1,15 @@
-# Introduction
+# git-fat
+
+Introduction
+------------
+
 Checking large binary files into a source repository (Git or otherwise) is a bad idea because repository size quickly becomes unreasonable.
 Even if the instantaneous working tree stays manageable, preserving repository integrity requires all binary files in the entire project history, which given the typically poor compression of binary diffs, implies that the repository size will become impractically large.
 Some people recommend checking binaries into different repositories or even not versioning them at all, but these are not satisfying solutions for most workflows.
 
-## Features of `git-fat`
+Features of `git-fat`
+---------------------
+
 * clones of the source repository are small and fast because no binaries are transferred, yet fully functional (unlike `git clone --depth`)
 * `git-fat` supports the same workflow for large binaries and traditionally versioned files, but internally manages the "fat" files separately
 * `git-bisect` works properly even when versions of the binary files change over time
@@ -12,11 +18,15 @@ Some people recommend checking binaries into different repositories or even not 
 * can easily support fat object stores distributed across multiple hosts
 * depends only on stock Python and rsync
 
-## Related projects
+Related projects
+----------------
+
 * [git-annex](http://git-annex.branchable.com) is a far more comprehensive solution, but with less transparent workflow and with more dependencies.
 * [git-media](https://github.com/schacon/git-media) adopts a similar approach to `git-fat`, but with a different synchronization philosophy and with many Ruby dependencies.
 
-# Installation and configuration
+Installation and configuration
+------------------------------
+
 Place `git-fat` in your `PATH`.
 
 Edit `.gitattributes` to regard any desired extensions as fat files.
@@ -41,7 +51,8 @@ will automatically have their remote set. This remote address can use
 any protocol supported by rsync. Most users will configure it to use
 remote ssh in a directory with shared access.
 
-# A worked example
+A worked example
+----------------
 
 Before we start, let's turn on verbose reporting so we can see what's
 happening. Without this environment variable, all the output lines
@@ -93,7 +104,8 @@ The patch itself is very simple and does not include the binary.
     @@ -0,0 +1 @@
     +#$# git-fat 1f218834a137f7b185b498924e7a030008aee2ae
 
-## Pushing fat files
+Pushing fat files
+-----------------
 Now let's push our fat files using the rsync configuration that we set up earlier.
 
     $ git fat push
@@ -106,7 +118,9 @@ Now let's push our fat files using the rsync configuration that we set up earlie
 
 We we might normally set a remote now and push the git repository.
 
-## Cloning and pulling
+Cloning and pulling
+-------------------
+
 Now let's look at what happens when we clone.
 
     $ cd ..
@@ -151,62 +165,18 @@ Everything is in place
     total 8
     -rw-r--r-- 1 jed users 6449 Nov 25 17:10 master.tar.gz
 
-## Summary
+Summary
+-------
+
 * Set the "fat" file types in `.gitattributes`.
 * Use normal git commands to interact with the repository without
   thinking about what files are fat and non-fat. The fat files will be
   treated specially.
 * Synchronize fat files with `git fat push` and `git fat pull`.
 
-## Retroactive import using `git filter-branch` [Experimental]
+Implementation notes
+--------------------
 
-Sometimes large objects were added to a repository by accident or for
-lack of a better place to put them. _If_ you are willing to rewrite
-history, forcing everyone to reclone, you can retroactively manage those
-files with `git fat`. Be sure that you understand the consequences of
-`git filter-branch` before attempting this. This feature is experimental
-and irreversible, so be doubly careful with backups.
-
-### Step 1: Locate the fat files
-
-Run `git fat find THRESH_BYTES > fat-files` and inspect `fat-files` in
-an editor. Lines will be sorted by the maximum object size that has been
-at each path, and look like
-
-    something.big           filter=fat -text #    8154677 1
-
-where the first number after the `#` is the number of bytes and the
-second number is the number of modifications that path has seen. You
-will normally filter out some of these paths using grep and/or an
-editor. When satisfied, remove the ends of the lines (including the `#`)
-and append to `.gitattributes`. It's best to `git add .gitattributes` and commit
-at this time (likely enrolling some extant files into `git fat`).
-
-### Step 2: `filter-branch`
-
-Copy `.gitattributes` to `/tmp/fat-filter-files` and edit to remove
-everything after the file name (e.g., `sed s/ \+filter=fat.*$//`).
-Currently, this may only contain exact paths relative to the root of the
-repository. Finally, run
-
-    git filter-branch --index-filter                 \
-        'git fat index-filter /tmp/fat-filter-files --manage-gitattributes' \
-        --tag-name-filter cat -- --all
-
-(You can remove the `--manage-gitattributes` option if you don't want to
-append all the files being enrolled in `git fat` to `.gitattributes`,
-however, future users would need to use `.git/info/attributes` to have
-the `git fat` fileters run.)
-When this finishes, inspect to see if everything is in order and follow
-the
-[Checklist for Shrinking a Repository](http://www.kernel.org/pub/software/scm/git/docs/git-filter-branch.html#_checklist_for_shrinking_a_repository)
-in the `git filter-branch` man page, typically `git clone
-file:///path/to/repo`. Be sure to `git fat push` from the original
-repository.
-
-See the script `test-retroactive.sh` for an example of cleaning.
-
-## Implementation notes
 The actual binary files are stored in `.git/fat/objects`, leaving `.git/objects` nice and small.
 
     $ du -bs .git/objects
@@ -220,8 +190,9 @@ If you have multiple clones that access the same filesystem, you can make
 will be available in all repositories without extra copies. You still need to
 `git fat push` to make it available to others.
 
-# Some refinements
-* Allow pulling and pushing only select files
+### Some refinements ###
+
+* Allow pushing only select files
 * Relate orphan objects to file system
 * Put some more useful message in smudged (working tree) version of missing files.
 * More friendly configuration for multiple fat remotes
