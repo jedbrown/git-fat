@@ -455,9 +455,14 @@ class GitFat(object):
         This method prevents fat from hijacking glob matches that are old
         '''
         # If the file doesn't exist in the immediately previous revision, add it
-        showfile = git('show HEAD:{}'.format(filename).split(), stdout=sub.PIPE, stderr=sub.PIPE)
+        showfile = git(['show', 'HEAD:{}'.format(filename)], stdout=sub.PIPE, stderr=sub.PIPE)
 
-        stream, is_fatfile = self._decode(showfile.stdout)
+        try:
+            stream, is_fatfile = self._decode(showfile.stdout)
+        except StopIteration:
+            # showfile.stdout returned nothing (file didn't exist so we can add it)
+            return True
+
         if is_fatfile:
             return True
 
@@ -466,9 +471,11 @@ class GitFat(object):
         for blk in stream:
             continue
 
+        # This should always be 0 since we already handle non existant file above with stopiteration
         if showfile.wait():
-            return True
+            raise Exception("git show HEAD:{} returned something unexpected!".format(filename))
 
+        # File exists but is not a fatfile, don't add it
         return False
 
     def pull(self, pattern=None, **kwargs):
