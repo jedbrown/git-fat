@@ -456,11 +456,20 @@ class GitFat(object):
         '''
         # If the file doesn't exist in the immediately previous revision, add it
         showfile = git('show HEAD:{}'.format(filename).split(), stdout=sub.PIPE, stderr=sub.PIPE)
-        if (showfile.wait()):
-            return True
-        # If it is already tracked, add it
+
         stream, is_fatfile = self._decode(showfile.stdout)
-        return is_fatfile
+        if is_fatfile:
+            return True
+
+        # Flush the buffers to prevent deadlock from wait()
+        # Caused when stdout from showfile is a large binary file and can't be fully buffered
+        for blk in stream:
+            continue
+
+        if showfile.wait():
+            return True
+
+        return False
 
     def pull(self, pattern=None, **kwargs):
         '''
