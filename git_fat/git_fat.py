@@ -294,10 +294,13 @@ class GitFat(object):
         filedict = {}
         revlist2 = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
         for line in revlist2.stdout:
-            hashobj = line.split()
+            hashobj = line.strip()
             # Revlist prints all objects (commits, trees, blobs) but blobs have the file path
             # next to the git objecthash
-            if len(hashobj) == 2:
+            # 40 + 1 for hash + space
+            if len(hashobj) > 41:
+                # Handle files with spaces
+                hashobj = hashobj[:40], hashobj[41:]
                 # If the object is one we're managing
                 if hashobj[0] in managed.keys():
                     filedict[hashobj[0]] = hashobj[1]

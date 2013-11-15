@@ -182,6 +182,47 @@ class GitFatTest(unittest.TestCase):
         out = git('fat -a status')
         self.assertTrue('Garbage' not in out)
 
+    def test_file_with_spaces(self):
+
+        git('init {}'.format(self.repo1))
+        os.chdir(self.repo1)
+
+        out = git('fat init')
+        with open('.gitfat', 'w') as f:
+            f.write('[rsync]\nremote=localhost:{}'.format(self.fatstore))
+
+        with open('.gitattributes', 'w') as f:
+            f.write('*.fat filter=fat -crlf')
+
+        git('add .gitattributes .gitfat')
+        git(['commit', '-m"new repository'])
+
+        contents = 'This is a fat file\n'
+        filename = 'A fat file with spaces.fat'
+        with open(filename, 'w') as f:
+            f.write(contents)
+
+        git(['add', filename])
+        git(['commit', '-madded fatfile'])
+
+        git('fat push')
+
+        os.chdir(self.tempdir)
+
+        git('clone {} {}'.format(self.repo1, self.repo2))
+
+        os.chdir(self.repo2)
+        git('fat init')
+        out = git('fat pull')
+        with open(filename, 'r') as f:
+            # Validate the file contents are correct (This tests the git race condition)
+            self.assertEquals(f.read(), contents)
+
+        out = git('fat list')
+        self.assertTrue(filename in out)
+
+        out = git('fat status')
+
 
 if __name__ == '__main__':
 
