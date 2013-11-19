@@ -67,9 +67,13 @@ class GitFatTest(unittest.TestCase):
         git('init {}'.format(self.repo1))
         os.chdir(self.repo1)
 
+        # Test 0 length existing file
+        with open('f.fat', 'w') as f:
+            f.write('')
+
         # Do this first so it doesn't become a fat file
         os.symlink('/oe/dss-oe/dss-add-ons-testing-build/deploy/licenses/common-licenses/GPL-3', 'c.fat')
-        git('add c.fat')
+        git('add c.fat f.fat')
         git(['commit', '-madded legacy file'])
 
         out = git('fat init')
