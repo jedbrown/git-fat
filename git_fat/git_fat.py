@@ -144,7 +144,7 @@ class GitFat(object):
         self.objdir = os.path.join(self.gitdir, 'fat', 'objects')
         self.cfgpath = os.path.join(self.gitroot, '.gitfat')
 
-        self.verbose = debug if verbose else empty
+        self.verbose = debug if verbose or os.environ.get("GIT_FAT_VERBOSE") else empty
 
         if not self._configured():
             print('Setting filters in .git/config')
@@ -217,7 +217,7 @@ class GitFat(object):
         '''
         cookie = '#$# git-fat '
         stream_iter = readblocks(stream)
-        # Read block for check
+        # Read block for check raises StopIteration if file is zero length
         block = next(stream_iter)
 
         def prepend(blk, iterator):
@@ -401,7 +401,9 @@ class GitFat(object):
         '''
         Public command to do the clean (should only be called by git)
         '''
+        self.verbose(cur_file)
         if self.can_clean_file(cur_file):
+            self.verbose("Adding {}".format(cur_file))
             self._filter_clean(sys.stdin, sys.stdout)
         else:
             self.verbose(
@@ -463,8 +465,13 @@ class GitFat(object):
         try:
             stream, is_fatfile = self._decode(showfile.stdout)
         except StopIteration:
-            # showfile.stdout returned nothing (file didn't exist so we can add it)
-            return True
+            # showfile.stdout returned nothing (file had zero length)
+            if showfile.wait():
+                # The file didn't exist in the repository
+                return True
+            else:
+                # The file exists and it's zero length
+                return False
 
         if is_fatfile:
             return True
@@ -474,7 +481,7 @@ class GitFat(object):
         for blk in stream:
             continue
 
-        # This should always be 0 since we already handle non existant file above with stopiteration
+        # This should always be 0 since we already handle non existant files above with stopiteration
         if showfile.wait():
             raise Exception("git show HEAD:{} returned something unexpected!".format(filename))
 
@@ -586,4 +593,9 @@ if __name__ == '__main__':
     # don't need this after configuring, breaks functions
     del kwargs['verbose']
     # Then execute function
-    args.func(**kwargs)
+    try:
+        args.func(**kwargs)
+    except:
+        if kwargs.get('cur_file'):
+            debug(kwargs.get('cur_file'))
+        raise
