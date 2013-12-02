@@ -114,6 +114,14 @@ def gitconfig_set(name, value, file=None):
     sub.check_call(args)
 
 
+def http_get(baseurl, filename):
+    ''' Returns file descriptor for http file stream, raises error if 404 '''
+    # Need to think about how python caches this and FIXME: raising 404 error
+    import urllib2
+    res = urllib2.urlopen('/'.join([baseurl, filename]))
+    return res.fp
+
+
 class GitFat(object):
 
     def __init__(self):
@@ -178,6 +186,21 @@ class GitFat(object):
         ssh_port = gitconfig_get('rsync.sshport', file=self.cfgpath)
         ssh_user = gitconfig_get('rsync.sshuser', file=self.cfgpath)
         return remote, ssh_port, ssh_user
+
+    def _http_opts(self):
+        '''
+        Read http options from config
+        '''
+        if not os.path.isfile(self.cfgpath):
+            print('git-fat requires that .gitfat is present to use http remotes', file=sys.stderr)
+            sys.exit(1)
+
+        remote = gitconfig_get('http.remote', file=self.cfgpath)
+        if not remote:
+            print('No http.remote in {}'.format(self.cfgpath), file=sys.stderr)
+            sys.exit(1)
+
+        return remote
 
     def _rsync(self, push):
         '''
@@ -346,56 +369,58 @@ class GitFat(object):
             self.verbose('git-fat filter-smudge: not a managed file')
             cat_iter(stream, sys.stdout)
 
+    def _hash_stream(self, blockiter, outstream):
+        '''
+        Writes blockiter to outstream and returns the digest and bytes written
+        '''
+        hasher = hashlib.new('sha1')
+        bytes_written = 0
+
+        for block in blockiter:
+            # Add the block to be hashed
+            hasher.update(block)
+            bytes_written += len(block)
+            outstream.write(block)
+        outstream.flush()
+        return hasher.hexdigest(), bytes_written
+
     def _filter_clean(self, instream, outstream):
         '''
         The clean filter runs when a file is added to the index. It gets the "smudged" (working copy)
         version of the file on stdin and produces the "clean" (repository) version on stdout.
         '''
 
-        hasher = hashlib.new('sha1')
-        bytes = 0
+        blockiter, is_placeholder = self._decode(instream)
+
+        if is_placeholder:
+            # This must be cat_iter, not cat because we already read from instream
+            cat_iter(blockiter, outstream)
+            return
+
+        # make temporary file for writing
         fd, tmpname = tempfile.mkstemp(dir=self.objdir)
-        cached = False
+        tmpstream = os.fdopen(fd, 'w')
 
-        try:
-            blockiter, is_placeholder = self._decode(instream)
+        # Hash the input, write to temp file
+        digest, size = self._hash_stream(blockiter, tmpstream)
+        tmpstream.close()
 
-            # Open the temporary file for writing
-            ostream = outstream
+        objfile = os.path.join(self.objdir, digest)
 
-            # if it's not a git-fat placeholder file, cache it
-            if not is_placeholder:
-                ostream = os.fdopen(fd, 'w')
+        if os.path.exists(objfile):
+            self.verbose('git-fat filter-clean: cached file already exists %s' % objfile)
+            # Remove temp file
+            os.remove(tmpname)
+        else:
+            # Set permissions for the new file using the current umask
+            os.chmod(tmpname, int('444', 8) & ~umask())
+            # Rename temp file
+            os.rename(tmpname, objfile)
+            self.verbose('git-fat filter-clean: caching to %s' % objfile)
 
-            for block in blockiter:
-                # Add the block to be hashed
-                hasher.update(block)
-                bytes += len(block)
-                ostream.write(block)
+        # Write placeholder to index
+        outstream.write(self.encode(digest, size))
 
-            ostream.flush()
-            digest = hasher.hexdigest()
-            objfile = os.path.join(self.objdir, digest)
-
-            # Create placeholder for the file
-            if not is_placeholder:
-                # Close temporary file
-                ostream.close()
-                if os.path.exists(objfile):
-                    self.verbose('git-fat filter-clean: cached file already exists %s' % objfile)
-                    os.remove(tmpname)
-                else:
-                    # Set permissions for the new file using the current umask
-                    os.chmod(tmpname, int('444', 8) & ~umask())
-                    os.rename(tmpname, objfile)
-                    self.verbose('git-fat filter-clean: caching to %s' % objfile)
-                cached = True
-                # Write placeholder to index
-                outstream.write(self.encode(digest, bytes))
-        finally:
-            # cleanup always
-            if not cached:
-                os.remove(tmpname)
 
     def filter_clean(self, cur_file, **kwargs):
         '''
@@ -521,14 +546,18 @@ class GitFat(object):
         p = sub.Popen(rsync, stdin=sub.PIPE)
         p.communicate(input='\x00'.join(files))
 
-    def status(self, **kwargs):
-        '''
-        Show orphan (in tree, but not in cache) and garbage (in cache, but not in tree) objects, if any.
-        '''
+    def _status(self):
         catalog = self._cached_objects()
         referenced = self._referenced_objects(**kwargs)
         garbage = catalog - referenced
         orphans = referenced - catalog
+        return garbage, orphans
+
+    def status(self, **kwargs):
+        '''
+        Show orphan (in tree, but not in cache) and garbage (in cache, but not in tree) objects, if any.
+        '''
+        garbage, orphans = self._status()
         if orphans:
             print('Orphan objects:')
             for orph in orphans:
@@ -537,6 +566,38 @@ class GitFat(object):
             print('Garbage objects:')
             for g in garbage:
                 print('\t' + g)
+
+    def http_pull(self, **kwargs):
+        '''
+        Alternative to rsync (for anon clones)
+        '''
+        _, orphans = self._status()
+        baseurl = self._http_opts()
+        for o in orphans:
+            stream = http_get(baseurl, o)
+
+            fd, tmpname = tempfile.mkstemp(dir=self.objdir)
+            tmpstream = os.fdopen(fd, 'w')
+
+            # Hash the input, write to temp file
+            digest, size = self._hash_stream(stream, tmpstream)
+            tmpstream.close()
+
+            if digest != o:
+                # Should I retry?
+                print('Downloaded digest ({}) did not match stored digest for orphan: {}'.format(digest, o), file=sys.stderr)
+                os.remove(tmpname)
+                continue
+
+            objfile = os.path.join(self.objdir, digest)
+            os.chmod(tmpname, int('444', 8) & ~umask())
+            # Rename temp file
+            os.rename(tmpname, objfile)
+            self.checkout()
+
+    def http_push(self):
+        ''' NOT IMPLEMENTED '''
+        pass
 
 if __name__ == '__main__':
 
@@ -581,6 +642,9 @@ if __name__ == '__main__':
 
     parser_list = subparser.add_parser('list', help='list all files managed by git-fat')
     parser_list.set_defaults(func=fat.list_files)
+
+    parser_list = subparser.add_parser('http-get', help='anonymously download git-fat orphans over http')
+    parser_list.set_defaults(func=fat.http_pull)
 
     args = parser.parse_args()
 
