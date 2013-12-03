@@ -115,11 +115,15 @@ def gitconfig_set(name, value, file=None):
 
 
 def http_get(baseurl, filename):
-    ''' Returns file descriptor for http file stream, raises error if 404 '''
-    # Need to think about how python caches this and FIXME: raising 404 error
+    ''' Returns file descriptor for http file stream, catches urllib2 errors '''
     import urllib2
-    res = urllib2.urlopen('/'.join([baseurl, filename]))
-    return res.fp
+    try:
+        geturl = '/'.join([baseurl, filename])
+        res = urllib2.urlopen(geturl)
+        return res.fp
+    except urllib2.URLError as e:
+        print(e.reason + ': {}'.format(geturl), file=sys.stderr)
+        return None
 
 
 class GitFat(object):
@@ -571,10 +575,17 @@ class GitFat(object):
         '''
         Alternative to rsync (for anon clones)
         '''
+        ret_code = 0
+
         _, orphans = self._status()
         baseurl = self._http_opts()
         for o in orphans:
             stream = http_get(baseurl, o)
+
+            # HTTP Error
+            if stream is None:
+                ret_code = 1
+                continue
 
             fd, tmpname = tempfile.mkstemp(dir=self.objdir)
             tmpstream = os.fdopen(fd, 'w')
@@ -585,8 +596,9 @@ class GitFat(object):
 
             if digest != o:
                 # Should I retry?
-                print('Downloaded digest ({}) did not match stored digest for orphan: {}'.format(digest, o), file=sys.stderr)
+                print('ERROR: Downloaded digest ({}) did not match stored digest for orphan: {}'.format(digest, o), file=sys.stderr)
                 os.remove(tmpname)
+                ret_code = 1
                 continue
 
             objfile = os.path.join(self.objdir, digest)
@@ -595,6 +607,7 @@ class GitFat(object):
             os.rename(tmpname, objfile)
 
         self.checkout()
+        sys.exit(ret_code)
 
     def http_push(self):
         ''' NOT IMPLEMENTED '''
