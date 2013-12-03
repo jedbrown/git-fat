@@ -593,7 +593,8 @@ class GitFat(object):
             os.chmod(tmpname, int('444', 8) & ~umask())
             # Rename temp file
             os.rename(tmpname, objfile)
-            self.checkout()
+
+        self.checkout()
 
     def http_push(self):
         ''' NOT IMPLEMENTED '''
