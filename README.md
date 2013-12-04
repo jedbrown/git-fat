@@ -72,7 +72,7 @@ After we've done a new clone of a repository using git-fat, to get the additiona
 
     git fat pull
 
-Or if you're doing an anonymous pull
+Or if you're doing an anonymous pull, and the repository managers support it.
 
     git fat pull-http
 
@@ -90,7 +90,7 @@ Orphans are files that exist as placeholders in the working copy.  Stale files a
 Implementation notes
 --------------------
 
-For many commands, `git-fat` by default only checks the current HEAD for placeholder files to clone. This can
+For many commands, `git-fat` by default only checks the current `HEAD` for placeholder files to clone. This can
 save on bandwidth for frequently changing large files and also saves on processing time for very large repositories.
 To force commands to search the entire history for placeholders and pull all files, call `git-fat` with `-a`. e.g.
 
@@ -99,6 +99,9 @@ To force commands to search the entire history for placeholders and pull all fil
 If you add `git-fat` to an existing repository, the default behavior is to not convert existing binary files to
 git-fat. Converting a file that already exists in the history for git would not save any space. Once the file is
 changed or renamed, it will then be added to the fat store.
+
+To setup an http server to accept git-fat requests, just configure a webserver to have a url serve up the git-fat
+directory on the server, and point the `.gitfat` http remote to that url.
 
 Related projects
 ----------------
