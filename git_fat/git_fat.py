@@ -550,22 +550,22 @@ class GitFat(object):
     def _status(self, **kwargs):
         catalog = self._cached_objects()
         referenced = self._referenced_objects(**kwargs)
-        garbage = catalog - referenced
+        stale = catalog - referenced
         orphans = referenced - catalog
-        return garbage, orphans
+        return stale, orphans
 
     def status(self, **kwargs):
         '''
-        Show orphan (in tree, but not in cache) and garbage (in cache, but not in tree) objects, if any.
+        Show orphan (in tree, but not in cache) and stale (in cache, but not in tree) objects, if any.
         '''
-        garbage, orphans = self._status(**kwargs)
+        stale, orphans = self._status(**kwargs)
         if orphans:
             print('Orphan objects:')
             for orph in orphans:
                 print('\t' + orph)
-        if garbage:
-            print('Garbage objects:')
-            for g in garbage:
+        if stale:
+            print('Stale objects:')
+            for g in stale:
                 print('\t' + g)
 
     def http_pull(self, **kwargs):
@@ -649,7 +649,7 @@ def main():
     parser_checkout = subparser.add_parser('checkout', help='resmudge all orphan objects')
     parser_checkout.set_defaults(func=fat.checkout)
 
-    parser_status = subparser.add_parser('status', help='print orphan and garbage objects')
+    parser_status = subparser.add_parser('status', help='print orphan and stale objects')
     parser_status.set_defaults(func=fat.status)
 
     parser_list = subparser.add_parser('list', help='list all files managed by git-fat')
