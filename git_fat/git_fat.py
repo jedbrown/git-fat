@@ -44,10 +44,8 @@ def git(cliargs, *args, **kwargs):
     ''' Calls git commands with Popen arguments '''
     return sub.Popen(['git'] + cliargs, *args, **kwargs)
 
-
-def debug(*args, **kwargs):
+def error(*args, **kwargs):
     return print(*args, file=sys.stderr, **kwargs)
-
 
 def empty(*args, **kwargs):
     pass
@@ -122,7 +120,7 @@ def http_get(baseurl, filename):
         res = urllib2.urlopen(geturl)
         return res.fp
     except urllib2.URLError as e:
-        print(e.reason + ': {}'.format(geturl), file=sys.stderr)
+        error("WARN: " + e.reason + ': {}'.format(geturl))
         return None
 
 
@@ -150,13 +148,13 @@ class GitFat(object):
             self.gitroot = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
             self.gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
         except sub.CalledProcessError:
-            print('git-fat must be run from a git directory', file=sys.stderr)
+            error('git-fat must be run from a git directory')
             sys.exit(1)
 
         self.objdir = os.path.join(self.gitdir, 'fat', 'objects')
         self.cfgpath = os.path.join(self.gitroot, '.gitfat')
 
-        self.verbose = debug if verbose or os.environ.get("GIT_FAT_VERBOSE") else empty
+        self.verbose = error if verbose or os.environ.get("GIT_FAT_VERBOSE") else empty
 
         if not self._configured():
             print('Setting filters in .git/config')
@@ -179,12 +177,12 @@ class GitFat(object):
         Read rsync options from config
         '''
         if not os.path.isfile(self.cfgpath):
-            print('git-fat requires that .gitfat is present to use rsync remotes', file=sys.stderr)
+            error('ERROR: git-fat requires that .gitfat is present to use rsync remotes')
             sys.exit(1)
 
         remote = gitconfig_get('rsync.remote', file=self.cfgpath)
         if not remote:
-            print('No rsync.remote in {}'.format(self.cfgpath), file=sys.stderr)
+            error('ERROR: No rsync.remote in {}'.format(self.cfgpath))
             sys.exit(1)
 
         ssh_port = gitconfig_get('rsync.sshport', file=self.cfgpath)
@@ -196,12 +194,12 @@ class GitFat(object):
         Read http options from config
         '''
         if not os.path.isfile(self.cfgpath):
-            print('git-fat requires that .gitfat is present to use http remotes', file=sys.stderr)
+            error('ERROR: git-fat requires that .gitfat is present to use http remotes')
             sys.exit(1)
 
         remote = gitconfig_get('http.remote', file=self.cfgpath)
         if not remote:
-            print('No http.remote in {}'.format(self.cfgpath), file=sys.stderr)
+            error('ERROR: No http.remote in {}'.format(self.cfgpath))
             sys.exit(1)
 
         return remote
@@ -596,7 +594,7 @@ class GitFat(object):
 
             if digest != o:
                 # Should I retry?
-                print('ERROR: Downloaded digest ({}) did not match stored digest for orphan: {}'.format(digest, o), file=sys.stderr)
+                error('ERROR: Downloaded digest ({}) did not match stored digest for orphan: {}'.format(digest, o))
                 os.remove(tmpname)
                 ret_code = 1
                 continue
@@ -668,12 +666,12 @@ if __name__ == '__main__':
     # First configure git-fat
     fat.configure(**kwargs)
 
-    # don't need this after configuring, breaks functions
+    # don't need this after configuring, breaks functions because of kwargs
     del kwargs['verbose']
     # Then execute function
     try:
         args.func(**kwargs)
     except:
         if kwargs.get('cur_file'):
-            debug(kwargs.get('cur_file'))
+            fat.verbose("ERROR: processing file: " + kwargs.get('cur_file'))
         raise
