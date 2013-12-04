@@ -8,8 +8,9 @@ Introduction
 
 Checking large binary files into a distributed version control system is a bad idea because repository size quickly
 becomes unmanagable. Every operation takes longer to complete and fresh clones become something that you do start
-doing overnight. Binary files do not have clean diffs and as a result do not compress well. Using git-fat allows you to
-separate the storage of largefiles from the source while still having them in the working directory for your project.
+doing overnight. Binary files do not have clean diffs and as a result do not compress well. Using `git-fat` allows
+you to separate the storage of largefiles from the source while still having them in the working directory
+for your project.
 
 Features
 --------
@@ -23,7 +24,7 @@ Features
 Installation
 ------------
 
-You can install git-fat using pip.
+You can install `git-fat` using pip.
 
     pip install git-fat
 
@@ -36,7 +37,7 @@ Usage
 -----
 
 First, create a [`.gitattributes`](http://git-scm.com/book/en/Customizing-Git-Git-Attributes) file in the
-root of your repository.  This file determines which files get converted to git-fat files.
+root of your repository.  This file determines which files get converted to `git-fat` files.
 
     cat >> .gitattributes <<EOF
     *.deb filter=fat -crlf
@@ -68,7 +69,7 @@ otherwise people won't get the binary file when they try to pull fat-files.
 
     git fat push
 
-After we've done a new clone of a repository using git-fat, to get the additional files we do a fat pull.
+After we've done a new clone of a repository using `git-fat`, to get the additional files we do a fat pull.
 
     git fat pull
 
@@ -76,11 +77,11 @@ Or if you're doing an anonymous pull, and the repository managers support it.
 
     git fat pull-http
 
-To list the files managed by git-fat
+To list the files managed by `git-fat`
 
     git fat list
 
-To get a summary of the orphans and stale files in the repository
+To get a summary of the orphan and stale files in the repository
 
     git fat status
 
@@ -97,17 +98,19 @@ To force commands to search the entire history for placeholders and pull all fil
     git fat -a pull
 
 If you add `git-fat` to an existing repository, the default behavior is to not convert existing binary files to
-git-fat. Converting a file that already exists in the history for git would not save any space. Once the file is
+`git-fat`. Converting a file that already exists in the history for git would not save any space. Once the file is
 changed or renamed, it will then be added to the fat store.
 
-To setup an http server to accept git-fat requests, just configure a webserver to have a url serve up the git-fat
+To setup an http server to accept `git-fat` requests, just configure a webserver to have a url serve up the `git-fat`
 directory on the server, and point the `.gitfat` http remote to that url.
 
 Related projects
 ----------------
 
-- [git-annex](http://git-annex.branchable.com) is a far more comprehensive solution, but designed for a more distributed use case and has more dependencies.
-- [git-media](https://github.com/schacon/git-media) adopts a similar approach to `git-fat`, but with a different synchronization philosophy and with many Ruby dependencies.
+- [git-annex](http://git-annex.branchable.com) is a far more comprehensive solution, but was designed for a more
+    distributed use case and has more dependencies.
+- [git-media](https://github.com/schacon/git-media) adopts a similar approach to `git-fat`, but with a different
+    synchronization philosophy and with many Ruby dependencies.
 
 Improvements
 ------------
