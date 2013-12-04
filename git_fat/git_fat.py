@@ -116,6 +116,7 @@ def http_get(baseurl, filename):
     ''' Returns file descriptor for http file stream, catches urllib2 errors '''
     import urllib2
     try:
+        print("Downloading: {}".format(filename))
         geturl = '/'.join([baseurl, filename])
         res = urllib2.urlopen(geturl)
         return res.fp
