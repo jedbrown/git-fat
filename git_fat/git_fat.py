@@ -654,7 +654,7 @@ if __name__ == '__main__':
     parser_list = subparser.add_parser('list', help='list all files managed by git-fat')
     parser_list.set_defaults(func=fat.list_files)
 
-    parser_list = subparser.add_parser('http-get', help='anonymously download git-fat orphans over http')
+    parser_list = subparser.add_parser('pull-http', help='anonymously download git-fat files over http')
     parser_list.set_defaults(func=fat.http_pull)
 
     args = parser.parse_args()
