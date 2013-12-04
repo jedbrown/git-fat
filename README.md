@@ -1,200 +1,94 @@
 git-fat
 =======
 
+A tool for managing large binary files in git repositories.
+
 Introduction
 ------------
 
-Checking large binary files into a source repository (Git or otherwise) is a bad idea because repository size quickly
-becomes unreasonable. Even if the instantaneous working tree stays manageable, preserving repository integrity
-requires all binary files in the entire project history, which given the typically poor compression of binary diffs,
-implies that the repository size will become impractically large. Some people recommend checking binaries into
-different repositories or even not versioning them at all, but these are not satisfying solutions for most workflows.
+Checking large binary files into a distributed version control system is a bad idea because repository size quickly
+becomes unmanagable. Every operation takes longer to complete and fresh clones become something that you do start
+doing overnight. Binary files do not have clean diffs and as a result do not compress well. Using git-fat allows you to
+separate the storage of largefiles from the source while still having them in the working directory for your project.
 
-Features of `git-fat`
----------------------
+Features
+--------
 
-* clones of the source repository are small and fast because no binaries are transferred, yet fully functional (unlike `git clone --depth`)
-* `git-fat` supports the same workflow for large binaries and traditionally versioned files, but internally manages the "fat" files separately
-* `git-bisect` works properly even when versions of the binary files change over time
-* selective control of which large files to pull into the local store
-* local fat object stores can be shared between multiple clones, even by different users
-* can easily support fat object stores distributed across multiple hosts
-* depends only on stock Python and rsync
+- Cloning the source code remains fast because binaries are not included
+- Binary files really exist in your working directory and are not soft-links
+- Only depends on Python 2.7, rsync and ssh
+- Download only the files you need with pattern matching
+- Supports anonymous downloads of files over http
 
-Installation and configuration
-------------------------------
+Installation
+------------
 
-Place `git-fat` in your `PATH`.
+You can install git-fat using pip.
 
-Edit `.gitattributes` to regard any desired extensions as fat files.
+    pip install git-fat
 
-    $ cat >> .gitattributes
-    *.png filter=fat -crlf
-    *.jpg filter=fat -crlf
-    *.gz  filter=fat -crlf
-    ^D
+Or you can install it simply by placing it on your path.
 
-Run `git fat init` to active the extension. Now add and commit as usual.
-Matched files will be transparently stored externally, but will appear
-complete in the working tree.
+    curl https://raw.github.com/cyaninc/git-fat/master/git_fat/git_fat.py \
+    | sudo tee /usr/local/bin/git-fat && sudo chmod +x /usr/local/bin/git-fat
 
-Set a remote store for the fat objects by editing `.gitfat`.
+Usage
+-----
+
+First, create a [`.gitattributes`](http://git-scm.com/book/en/Customizing-Git-Git-Attributes) file in the
+root of your repository.  This file determines which files get converted to git-fat files.
+
+    cat >> .gitattributes <<EOF
+    *.deb filter=fat -crlf
+    *.gz filter=fat -crlf
+    *.zip filter=fat -crlf
+    EOF
+
+Next, create a `.gitfat` configuration file in the root of your repo that contains the location of the
+remote store for the binary files. Optionally include the ssh user and port if non-standard. Also,
+optionally include an http remote for anonymous clones.
 
     [rsync]
-    remote = your.remote-host.org:/share/fat-store
-
-This file should typically be committed to the repository so that others
-will automatically have their remote set. This remote address can use
-any protocol supported by rsync. Most users will configure it to use
-remote ssh in a directory with shared access.
-
-You can also set an http url for a store in the `.gitfat` file. This url
-serves as the root of the store and can only be cloned from, not pushed to.
-
+    remote = storage.example.com:/path/to/store
+    user = git
+    port = 2222
     [http]
-    remote = http://store.example.com/share/fat-store
+    remote = http://storage.example.com/store
 
-This is useful for things like automated builds and public repositories
-so that the anonymous users don't need to configure ssh.
+Commit those files so that others will be able to use them.
 
-A worked example
-----------------
+Initalize the repository.  This adds a line to `.git/config` telling git what command to run for the `fat`
+filter is in the `.gitattributes` file.
 
-Before we start, let's turn on verbose reporting so we can see what's
-happening. Without this environment variable, all the output lines
-starting with `git-fat` will not be shown.
+    git fat init
 
-    $ export GIT_FAT_VERBOSE=1
+Now when you add a file that matches a pattern in the `.gitattributes` file, it will be converted to a fat placeholder
+file before getting commited to the repository. After you've added a file **remember to push it to the fat store**,
+otherwise people won't get the binary file when they try to pull fat-files.
 
-First, we create a repository and configure it for use with `git-fat`.
+    git fat push
 
-    $ git init repo
-    Initialized empty Git repository in /tmp/repo/.git/
-    $ cd repo
-    $ git fat init
-    $ cat > .gitfat
-    [rsync]
-    remote = localhost:/tmp/fat-store
-    $ mkdir -p /tmp/fat-store               # make sure the remote directory exists
-    $ echo '*.gz filter=fat -crlf' > .gitattributes
-    $ git add .gitfat .gitattributes
-    $ git commit -m'Initial repository'
-    [master (root-commit) eb7facb] Initial repository
-     2 files changed, 3 insertions(+)
-     create mode 100644 .gitattributes
-     create mode 100644 .gitfat
+After we've done a new clone of a repository using git-fat, to get the additional files we do a fat pull.
 
-Now we add a binary file whose name matches the pattern we set in `.gitattributes`.
+    git fat pull
 
-    $ curl https://nodeload.github.com/jedbrown/git-fat/tar.gz/master -o master.tar.gz
-      % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                     Dload  Upload   Total   Spent    Left  Speed
-    100  6449  100  6449    0     0   7741      0 --:--:-- --:--:-- --:--:--  9786
-    $ git add master.tar.gz
-    git-fat filter-clean: caching to /tmp/repo/.git/fat/objects/b3489819f81603b4c04e8ed134b80bace0810324
-    $ git commit -m'Added master.tar.gz'
-    [master b85a96f] Added master.tar.gz
-    git-fat filter-clean: caching to /tmp/repo/.git/fat/objects/b3489819f81603b4c04e8ed134b80bace0810324
-     1 file changed, 1 insertion(+)
-     create mode 100644 master.tar.gz
+Or if you're doing an anonymous pull
 
-The patch itself is very simple and does not include the binary.
+    git fat pull-http
 
-    $ git show --pretty=oneline HEAD
-    918063043a6156172c2ad66478c6edd5c7df0217 Add master.tar.gz
-    diff --git a/master.tar.gz b/master.tar.gz
-    new file mode 100644
-    index 0000000..12f7d52
-    --- /dev/null
-    +++ b/master.tar.gz
-    @@ -0,0 +1 @@
-    +#$# git-fat 1f218834a137f7b185b498924e7a030008aee2ae
+To list the files managed by git-fat
 
-Pushing fat files
------------------
-Now let's push our fat files using the rsync configuration that we set up earlier.
+    git fat list
 
-    $ git fat push
-    Pushing to localhost:/tmp/fat-store
-    building file list ...
-    1 file to consider
+To get a summary of the orphans and stale files in the repository
 
-    sent 61 bytes  received 12 bytes  48.67 bytes/sec
-    total size is 6449  speedup is 88.34
+    git fat status
 
-We we might normally set a remote now and push the git repository.
-
-Cloning and pulling
--------------------
-
-Now let's look at what happens when we clone.
-
-    $ cd ..
-    $ git clone repo repo2
-    Cloning into 'repo2'...
-    done.
-    $ cd repo2
-    $ git fat init                          # don't forget
-    $ ls -l                                 # file is just a placeholder
-    total 4
-    -rw-r--r--  1 jed  users  53 Nov 25 22:42 master.tar.gz
-    $ cat master.tar.gz                     # holds the SHA1 of the file
-    #$# git-fat 1f218834a137f7b185b498924e7a030008aee2ae
-
-We can always get a summary of what fat objects are missing in our local cache.
-
-    Orphan objects:
-    1f218834a137f7b185b498924e7a030008aee2ae
-
-Now get any objects referenced by our current `HEAD`. This command also
-accepts the `--all` option to pull full history, or a revision to pull
-selected history.
-
-    $ git fat pull
-    receiving file list ...
-    1 file to consider
-    1f218834a137f7b185b498924e7a030008aee2ae
-            6449 100%    6.15MB/s    0:00:00 (xfer#1, to-check=0/1)
-    
-    sent 30 bytes  received 6558 bytes  4392.00 bytes/sec
-    total size is 6449  speedup is 0.98
-    Restoring 1f218834a137f7b185b498924e7a030008aee2ae -> master.tar.gz
-    git-fat filter-smudge: restoring from /tmp/repo2/.git/fat/objects/1f218834a137f7b185b498924e7a030008aee2ae
-
-Everything is in place
-
-    $ git status
-    git-fat filter-clean: caching to /tmp/repo2/.git/fat/objects/1f218834a137f7b185b498924e7a030008aee2ae
-    # On branch master
-    nothing to commit, working directory clean
-    $ ls -l                                 # recovered the full file
-    total 8
-    -rw-r--r-- 1 jed users 6449 Nov 25 17:10 master.tar.gz
-
-Summary
--------
-
-* Set the "fat" file types in `.gitattributes`.
-* Use normal git commands to interact with the repository without
-  thinking about what files are fat and non-fat. The fat files will be
-  treated specially.
-* Synchronize fat files with `git fat push` and `git fat pull`.
+Orphans are files that exist as placeholders in the working copy.  Stale files are files that are in the
+`.git/fat/objects` directory, but have no working copy associated with them (e.g. old versions of files).
 
 Implementation notes
 --------------------
-
-The actual binary files are stored in `.git/fat/objects`, leaving `.git/objects` nice and small.
-
-    $ du -bs .git/objects
-    2212    .git/objects/
-    $ ls -l .git/fat/objects                # This is where the file actually goes, but that's not important
-    total 8
-    -rw------- 1 jed users 6449 Nov 25 17:01 1f218834a137f7b185b498924e7a030008aee2ae
-
-If you have multiple clones that access the same filesystem, you can make
-`.git/fat/objects` a symlink to a common location, in which case all content
-will be available in all repositories without extra copies. You still need to
-`git fat push` to make it available to others.
 
 For many commands, `git-fat` by default only checks the current HEAD for placeholder files to clone. This can
 save on bandwidth for frequently changing large files and also saves on processing time for very large repositories.
@@ -202,20 +96,18 @@ To force commands to search the entire history for placeholders and pull all fil
 
     git fat -a pull
 
+If you add `git-fat` to an existing repository, the default behavior is to not convert existing binary files to
+git-fat. Converting a file that already exists in the history for git would not save any space. Once the file is
+changed or renamed, it will then be added to the fat store.
+
 Related projects
 ----------------
 
-* [git-annex](http://git-annex.branchable.com) is a far more comprehensive solution, but with less transparent workflow and with more dependencies.
-* [git-media](https://github.com/schacon/git-media) adopts a similar approach to `git-fat`, but with a different synchronization philosophy and with many Ruby dependencies.
+- [git-annex](http://git-annex.branchable.com) is a far more comprehensive solution, but designed for a more distributed use case and has more dependencies.
+- [git-media](https://github.com/schacon/git-media) adopts a similar approach to `git-fat`, but with a different synchronization philosophy and with many Ruby dependencies.
 
-### Some refinements ###
+Improvements
+------------
 
-* Allow pushing only select files
-* Relate orphan objects to file system
-* Put some more useful message in smudged (working tree) version of missing files.
-* More friendly configuration for multiple fat remotes
-* Make commands safer in presence of a dirty tree.
-* Private setting of a different remote.
-* Gracefully handle unmanaged files when the filter is called (either
-  legacy files or files matching the pattern that should some reason not
-  be treated as fat).
+- More friendly configuration for multiple fat remotes
+- Private setting of a different remote.
