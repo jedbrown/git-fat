@@ -1,1 +1,6 @@
-../git_fat/git_fat.py
+#!/usr/bin/python
+
+from git_fat import main
+
+if __name__ == '__main__':
+    main()

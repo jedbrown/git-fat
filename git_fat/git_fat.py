@@ -547,7 +547,7 @@ class GitFat(object):
         p = sub.Popen(rsync, stdin=sub.PIPE)
         p.communicate(input='\x00'.join(files))
 
-    def _status(self):
+    def _status(self, **kwargs):
         catalog = self._cached_objects()
         referenced = self._referenced_objects(**kwargs)
         garbage = catalog - referenced
@@ -558,7 +558,7 @@ class GitFat(object):
         '''
         Show orphan (in tree, but not in cache) and garbage (in cache, but not in tree) objects, if any.
         '''
-        garbage, orphans = self._status()
+        garbage, orphans = self._status(**kwargs)
         if orphans:
             print('Orphan objects:')
             for orph in orphans:
@@ -574,7 +574,7 @@ class GitFat(object):
         '''
         ret_code = 0
 
-        _, orphans = self._status()
+        _, orphans = self._status(**kwargs)
         baseurl = self._http_opts()
         for o in orphans:
             stream = http_get(baseurl, o)
@@ -610,7 +610,8 @@ class GitFat(object):
         ''' NOT IMPLEMENTED '''
         pass
 
-if __name__ == '__main__':
+
+def main():
 
     import argparse
 
@@ -674,3 +675,7 @@ if __name__ == '__main__':
         if kwargs.get('cur_file'):
             fat.verbose("ERROR: processing file: " + kwargs.get('cur_file'))
         raise
+
+
+if __name__ == '__main__':
+    main()
