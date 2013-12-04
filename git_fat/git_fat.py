@@ -127,16 +127,11 @@ def http_get(baseurl, filename):
 class GitFat(object):
 
     def __init__(self):
-        if os.environ.get('GIT_FAT_VERSION') == '1':
-            self.encode = self.encode_v1
-        else:
-            self.encode = self.encode_v2
 
         def magiclen(enc):
             return len(enc(hashlib.sha1('dummy').hexdigest(), 5))
 
-        self.magiclen = magiclen(self.encode)  # Current version
-        self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]]  # All prior versions
+        self.magiclen = magiclen(self._encode)
 
     def configure(self, verbose=False, **kwargs):
         '''
@@ -202,6 +197,10 @@ class GitFat(object):
             error('ERROR: No http.remote in {}'.format(self.cfgpath))
             sys.exit(1)
 
+        if not remote.startswith('http') or remote.startswith('https'):
+            error('ERROR: http remote url must start with http:// or https://')
+            sys.exit(1)
+
         return remote
 
     def _rsync(self, push):
@@ -228,12 +227,10 @@ class GitFat(object):
             cmd += [remote + '/', self.objdir + '/']
         return cmd
 
-    def encode_v1(self, digest, bytes):
-        'Produce legacy representation of file to be stored in repository.'
-        return '#$# git-fat %s\n' % (digest, )
-
-    def encode_v2(self, digest, bytes):
-        'Produce representation of file to be stored in repository. 20 characters can hold 64-bit integers.'
+    def _encode(self, digest, bytes):
+        '''
+        Produce representation of file to be stored in repository. 20 characters can hold 64-bit integers.
+        '''
         return '#$# git-fat %s %20d\n' % (digest, bytes)
 
     def _decode(self, stream):
@@ -256,6 +253,21 @@ class GitFat(object):
             assert(len(block) == self.magiclen)  # Sanity check
             return ret, True
         return ret, False
+
+    def _hash_stream(self, blockiter, outstream):
+        '''
+        Writes blockiter to outstream and returns the digest and bytes written
+        '''
+        hasher = hashlib.new('sha1')
+        bytes_written = 0
+
+        for block in blockiter:
+            # Add the block to be hashed
+            hasher.update(block)
+            bytes_written += len(block)
+            outstream.write(block)
+        outstream.flush()
+        return hasher.hexdigest(), bytes_written
 
     def _get_digest(self, stream):
         '''
@@ -303,7 +315,7 @@ class GitFat(object):
         for line in catfile.stdout:
             objhash, objtype, size = line.split()
             # files are of blob type
-            if objtype == 'blob' and int(size) in self.magiclens:
+            if objtype == 'blob' and int(size) == self.magiclen:
                 # Read the actual file contents
                 readfile = git(['cat-file', '-p', objhash], stdout=sub.PIPE)
                 digest = self._get_digest(readfile.stdout)
@@ -371,21 +383,6 @@ class GitFat(object):
             self.verbose('git-fat filter-smudge: not a managed file')
             cat_iter(stream, sys.stdout)
 
-    def _hash_stream(self, blockiter, outstream):
-        '''
-        Writes blockiter to outstream and returns the digest and bytes written
-        '''
-        hasher = hashlib.new('sha1')
-        bytes_written = 0
-
-        for block in blockiter:
-            # Add the block to be hashed
-            hasher.update(block)
-            bytes_written += len(block)
-            outstream.write(block)
-        outstream.flush()
-        return hasher.hexdigest(), bytes_written
-
     def _filter_clean(self, instream, outstream):
         '''
         The clean filter runs when a file is added to the index. It gets the "smudged" (working copy)
@@ -421,8 +418,7 @@ class GitFat(object):
             self.verbose('git-fat filter-clean: caching to %s' % objfile)
 
         # Write placeholder to index
-        outstream.write(self.encode(digest, size))
-
+        outstream.write(self._encode(digest, size))
 
     def filter_clean(self, cur_file, **kwargs):
         '''
