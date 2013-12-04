@@ -352,7 +352,7 @@ class GitFat(object):
         '''
         generator for placeholders in working tree that match pattern
         '''
-        # Null-terminated for proper file name handling
+        # Null-terminated for proper file name handling (spaces)
         for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
             stat = os.lstat(fname)
             if stat.st_size != self.magiclen or os.path.islink(fname):
