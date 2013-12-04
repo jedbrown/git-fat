@@ -44,8 +44,10 @@ def git(cliargs, *args, **kwargs):
     ''' Calls git commands with Popen arguments '''
     return sub.Popen(['git'] + cliargs, *args, **kwargs)
 
+
 def error(*args, **kwargs):
     return print(*args, file=sys.stderr, **kwargs)
+
 
 def empty(*args, **kwargs):
     pass
