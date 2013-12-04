@@ -1,11 +1,14 @@
-# git-fat
+git-fat
+=======
 
 Introduction
 ------------
 
-Checking large binary files into a source repository (Git or otherwise) is a bad idea because repository size quickly becomes unreasonable.
-Even if the instantaneous working tree stays manageable, preserving repository integrity requires all binary files in the entire project history, which given the typically poor compression of binary diffs, implies that the repository size will become impractically large.
-Some people recommend checking binaries into different repositories or even not versioning them at all, but these are not satisfying solutions for most workflows.
+Checking large binary files into a source repository (Git or otherwise) is a bad idea because repository size quickly
+becomes unreasonable. Even if the instantaneous working tree stays manageable, preserving repository integrity
+requires all binary files in the entire project history, which given the typically poor compression of binary diffs,
+implies that the repository size will become impractically large. Some people recommend checking binaries into
+different repositories or even not versioning them at all, but these are not satisfying solutions for most workflows.
 
 Features of `git-fat`
 ---------------------
@@ -17,12 +20,6 @@ Features of `git-fat`
 * local fat object stores can be shared between multiple clones, even by different users
 * can easily support fat object stores distributed across multiple hosts
 * depends only on stock Python and rsync
-
-Related projects
-----------------
-
-* [git-annex](http://git-annex.branchable.com) is a far more comprehensive solution, but with less transparent workflow and with more dependencies.
-* [git-media](https://github.com/schacon/git-media) adopts a similar approach to `git-fat`, but with a different synchronization philosophy and with many Ruby dependencies.
 
 Installation and configuration
 ------------------------------
@@ -50,6 +47,15 @@ This file should typically be committed to the repository so that others
 will automatically have their remote set. This remote address can use
 any protocol supported by rsync. Most users will configure it to use
 remote ssh in a directory with shared access.
+
+You can also set an http url for a store in the `.gitfat` file. This url
+serves as the root of the store and can only be cloned from, not pushed to.
+
+    [http]
+    remote = http://store.example.com/share/fat-store
+
+This is useful for things like automated builds and public repositories
+so that the anonymous users don't need to configure ssh.
 
 A worked example
 ----------------
@@ -189,6 +195,18 @@ If you have multiple clones that access the same filesystem, you can make
 `.git/fat/objects` a symlink to a common location, in which case all content
 will be available in all repositories without extra copies. You still need to
 `git fat push` to make it available to others.
+
+For many commands, `git-fat` by default only checks the current HEAD for placeholder files to clone. This can
+save on bandwidth for frequently changing large files and also saves on processing time for very large repositories.
+To force commands to search the entire history for placeholders and pull all files, call `git-fat` with `-a`. e.g.
+
+    git fat -a pull
+
+Related projects
+----------------
+
+* [git-annex](http://git-annex.branchable.com) is a far more comprehensive solution, but with less transparent workflow and with more dependencies.
+* [git-media](https://github.com/schacon/git-media) adopts a similar approach to `git-fat`, but with a different synchronization philosophy and with many Ruby dependencies.
 
 ### Some refinements ###
 
