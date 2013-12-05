@@ -165,7 +165,7 @@ class GitFatTest(unittest.TestCase):
 
         a_digest = os.listdir('.git/fat/objects')[0]
 
-        # Change contents to make garbage
+        # Change contents to make stale
         git('mv a.fat b.fat')
         with open('b.fat', 'a') as f:
             f.write(contents)
@@ -178,13 +178,13 @@ class GitFatTest(unittest.TestCase):
         os.remove(os.path.join(self.repo1, '.git/fat/objects/', b_digest))
 
         out = git('fat status')
-        self.assertTrue('Garbage' in out)
+        self.assertTrue('Stale' in out)
         self.assertTrue('Orphan' in out)
 
         # Traversing the history we can see that the file
         # in .git/fat/objects belongs to a.fat
         out = git('fat -a status')
-        self.assertTrue('Garbage' not in out)
+        self.assertTrue('Stale' not in out)
 
     def test_file_with_spaces(self):
 
@@ -231,11 +231,13 @@ class GitFatTest(unittest.TestCase):
 if __name__ == '__main__':
 
     path = os.environ["PATH"]
+
     # Use our coverage python executable
     test_dir = os.path.dirname(os.path.realpath(__file__))
+
     # Use development version of git-fat
-    git_fat_bin = os.path.normpath(os.path.join(test_dir, '../bin'))
-    os.environ["PATH"] = ':'.join([test_dir, git_fat_bin] + path.split(':'))
+    os.environ["PATH"] = ':'.join([test_dir] + path.split(':'))
+
     print os.environ["PATH"]
 
     unittest.main()

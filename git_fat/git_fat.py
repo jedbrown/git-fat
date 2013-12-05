@@ -243,7 +243,10 @@ class GitFat(object):
         cookie = '#$# git-fat '
         stream_iter = readblocks(stream)
         # Read block for check raises StopIteration if file is zero length
-        block = next(stream_iter)
+        try:
+            block = next(stream_iter)
+        except StopIteration:
+            return stream_iter, False
 
         def prepend(blk, iterator):
             yield blk
@@ -276,6 +279,9 @@ class GitFat(object):
         '''
         Returns digest if stream is fatfile placeholder or '' if not
         '''
+        # DONT EVER CALL THIS FUNCTION FROM FILTERS, IT DISCARDS THE FIRST
+        # BLOCK OF THE INPUT STREAM.  IT IS ONLY MEANT TO CHECK THE STATUS
+        # OF A FILE IN THE TREE
         stream, fatfile = self._decode(stream)
         if fatfile:
             block = next(stream)  # read the first block
@@ -370,9 +376,9 @@ class GitFat(object):
         The smudge filter runs whenever a file is being checked out into the working copy of the tree
         instream is sys.stdin and outstream is sys.stdout when it is called by git
         '''
-        stream, fatfile = self._decode(instream)
+        blockiter, fatfile = self._decode(instream)
         if fatfile:
-            block = next(stream)  # read the first block
+            block = next(blockiter)  # read the first block
             digest = block.split()[2]
             objfile = os.path.join(self.objdir, digest)
             try:
@@ -384,7 +390,7 @@ class GitFat(object):
                 outstream.write(block)
         else:
             self.verbose('git-fat filter-smudge: not a managed file')
-            cat_iter(stream, sys.stdout)
+            cat_iter(blockiter, sys.stdout)
 
     def _filter_clean(self, instream, outstream):
         '''
@@ -427,16 +433,17 @@ class GitFat(object):
         '''
         Public command to do the clean (should only be called by git)
         '''
-        self.verbose(cur_file)
-        if self.can_clean_file(cur_file):
-            self.verbose("Adding {}".format(cur_file))
-            self._filter_clean(sys.stdin, sys.stdout)
-        else:
+        if cur_file and not self.can_clean_file(cur_file):
             self.verbose(
                 "Not adding: {}\n".format(cur_file) +
                 "It is not a new file and is not managed by git-fat"
             )
             cat(sys.stdin, sys.stdout)
+
+        if (cur_file):
+            self.verbose("Adding {}".format(cur_file))
+
+        self._filter_clean(sys.stdin, sys.stdout)
 
     def filter_smudge(self, **kwargs):
         '''
@@ -488,28 +495,18 @@ class GitFat(object):
         # If the file doesn't exist in the immediately previous revision, add it
         showfile = git(['show', 'HEAD:{}'.format(filename)], stdout=sub.PIPE, stderr=sub.PIPE)
 
-        try:
-            stream, is_fatfile = self._decode(showfile.stdout)
-        except StopIteration:
-            # showfile.stdout returned nothing (file had zero length)
-            if showfile.wait():
-                # The file didn't exist in the repository
-                return True
-            else:
-                # The file exists and it's zero length
-                return False
-
-        if is_fatfile:
-            return True
+        blockiter, is_fatfile = self._decode(showfile.stdout)
 
         # Flush the buffers to prevent deadlock from wait()
         # Caused when stdout from showfile is a large binary file and can't be fully buffered
-        for blk in stream:
+        # I haven't figured out a way to avoid this unfortunately
+        for blk in blockiter:
             continue
 
-        # This should always be 0 since we already handle non existant files above with stopiteration
-        if showfile.wait():
-            raise Exception("git show HEAD:{} returned something unexpected!".format(filename))
+        if showfile.wait() or is_fatfile:
+            # The file didn't exist in the repository
+            # The file was a fatfile (which may have changed)
+            return True
 
         # File exists but is not a fatfile, don't add it
         return False
@@ -548,6 +545,9 @@ class GitFat(object):
         p.communicate(input='\x00'.join(files))
 
     def _status(self, **kwargs):
+        '''
+        Helper function that returns the oprhans and stale files
+        '''
         catalog = self._cached_objects()
         referenced = self._referenced_objects(**kwargs)
         stale = catalog - referenced
@@ -578,9 +578,10 @@ class GitFat(object):
         baseurl = self._http_opts()
         for o in orphans:
             stream = http_get(baseurl, o)
+            blockiter = readblocks(stream)
 
             # HTTP Error
-            if stream is None:
+            if blockiter is None:
                 ret_code = 1
                 continue
 
@@ -588,7 +589,7 @@ class GitFat(object):
             tmpstream = os.fdopen(fd, 'w')
 
             # Hash the input, write to temp file
-            digest, size = self._hash_stream(stream, tmpstream)
+            digest, size = self._hash_stream(blockiter, tmpstream)
             tmpstream.close()
 
             if digest != o:
@@ -632,11 +633,11 @@ def main():
     parser_init.set_defaults(func=empty)
 
     parser_filter_clean = subparser.add_parser('filter-clean', help='filter-clean to be called only by git')
-    parser_filter_clean.add_argument("cur_file")
+    parser_filter_clean.add_argument("cur_file", nargs="?")
     parser_filter_clean.set_defaults(func=fat.filter_clean)
 
     parser_filter_smudge = subparser.add_parser('filter-smudge', help='filter-smudge to be called only by git')
-    parser_filter_smudge.add_argument("cur_file")  # Currently unused
+    parser_filter_smudge.add_argument("cur_file", nargs="?")  # Currently unused
     parser_filter_smudge.set_defaults(func=fat.filter_smudge)
 
     parser_push = subparser.add_parser('push', help='push cache to remote git-fat server')
