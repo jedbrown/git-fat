@@ -131,10 +131,16 @@ class GitFat(object):
 
     def __init__(self):
 
-        def magiclen(enc):
-            return len(enc(hashlib.sha1('dummy').hexdigest(), 5))
+        def magiclen(enc_func):
+            return len(enc_func(hashlib.sha1('dummy').hexdigest(), 5))
 
-        self.magiclen = magiclen(self._encode)
+        self._cookie = '#$# git-fat '
+        self._format = self._cookie + '{digest} {size:20d}\n'
+        # Legacy format support below
+        if os.environ.get('GIT_FAT_VERSION'):
+            self._format = self._cookie + '{digest}\n'
+
+        self._magiclen = magiclen(self._encode)
 
     def configure(self, verbose=False, **kwargs):
         '''
@@ -230,17 +236,16 @@ class GitFat(object):
             cmd += [remote + '/', self.objdir + '/']
         return cmd
 
-    def _encode(self, digest, bytes):
+    def _encode(self, digest, size):
         '''
         Produce representation of file to be stored in repository. 20 characters can hold 64-bit integers.
         '''
-        return '#$# git-fat %s %20d\n' % (digest, bytes)
+        return self._format.format(digest=digest, size=size)
 
     def _decode(self, stream):
         '''
         Returns iterator and True if stream is git-fat object
         '''
-        cookie = '#$# git-fat '
         stream_iter = readblocks(stream)
         # Read block for check raises StopIteration if file is zero length
         try:
@@ -255,8 +260,8 @@ class GitFat(object):
 
         # Put block back
         ret = prepend(block, stream_iter)
-        if block.startswith(cookie):
-            assert(len(block) == self.magiclen)  # Sanity check
+        if block.startswith(self._cookie):
+            assert(len(block) == self._magiclen)  # Sanity check
             return ret, True
         return ret, False
 
@@ -324,7 +329,7 @@ class GitFat(object):
         for line in catfile.stdout:
             objhash, objtype, size = line.split()
             # files are of blob type
-            if objtype == 'blob' and int(size) == self.magiclen:
+            if objtype == 'blob' and int(size) == self._magiclen:
                 # Read the actual file contents
                 readfile = git(['cat-file', '-p', objhash], stdout=sub.PIPE)
                 digest = self._get_digest(readfile.stdout)
@@ -364,7 +369,7 @@ class GitFat(object):
         # Null-terminated for proper file name handling (spaces)
         for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
             stat = os.lstat(fname)
-            if stat.st_size != self.magiclen or os.path.islink(fname):
+            if stat.st_size != self._magiclen or os.path.islink(fname):
                 continue
             with open(fname) as f:
                 digest = self._get_digest(f)
