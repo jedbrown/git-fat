@@ -307,16 +307,18 @@ class GitFat(object):
         objs_dict = self._managed_files(**kwargs)
         return set(objs_dict.keys())
 
-    def _managed_files(self, rev=None, full_history=False):
+    def _rev_list(self, rev=None, full_history=False):
         '''
-        Finds managed files in the specified revision
+        Generator for objects in rev. Returns (hash, type, size) tuple.
         '''
+
         rev = rev or 'HEAD'
         # full_history implies --all
         args = ['--all'] if full_history else ['--no-walk', rev]
 
         # Get all the git objects in the current revision and in history if --all is specified
-        revlist = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
+        # -g ensures that we're only searching reachable commits
+        revlist = git('rev-list -g --objects'.split() + args, stdout=sub.PIPE)
         # Grab only the first column.  Tried doing this in python but because of the way that
         # subprocess.PIPE buffering works, I was running into memory issues with larger repositories
         # plugging pipes to other subprocesses appears to not have the memory buffer issue
@@ -324,27 +326,22 @@ class GitFat(object):
         # Read the objects and print <sha> <type> <size>
         catfile = git('cat-file --batch-check'.split(), stdin=awk.stdout, stdout=sub.PIPE)
 
-        # Find any objects that are git-fat placeholders which are tracked in the repository
-        managed = {}
         for line in catfile.stdout:
             objhash, objtype, size = line.split()
-            # files are of blob type
-            if objtype == 'blob' and int(size) == self._magiclen:
-                # Read the actual file contents
-                readfile = git(['cat-file', '-p', objhash], stdout=sub.PIPE)
-                digest = self._get_digest(readfile.stdout)
-                if digest:
-                    managed[objhash] = digest
+            yield objhash, objtype, size
+
         catfile.wait()
 
-        # go through rev-list again to get the filenames
-        # Again, I tried avoiding making another call to rev-list by caching the
-        # filenames above, but was running into the memory buffer issue
-        # Instead we just make another call to rev-list.  Takes more time, but still
-        # only takes 5 seconds to traverse the entire history of a 22k commit repo
-        filedict = {}
-        revlist2 = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
-        for line in revlist2.stdout:
+    def _find_paths(self, hashes, rev=None, full_history=False):
+        '''
+        Takes a list of git object hashes and generates hash,path tuples
+        '''
+        rev = rev or 'HEAD'
+        # full_history implies --all
+        args = ['--all'] if full_history else ['--no-walk', rev]
+
+        revlist = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
+        for line in revlist.stdout:
             hashobj = line.strip()
             # Revlist prints all objects (commits, trees, blobs) but blobs have the file path
             # next to the git objecthash
@@ -353,9 +350,34 @@ class GitFat(object):
                 # Handle files with spaces
                 hashobj = hashobj[:40], hashobj[41:]
                 # If the object is one we're managing
-                if hashobj[0] in managed.keys():
-                    filedict[hashobj[0]] = hashobj[1]
-        revlist2.wait()
+                if hashobj[0] in hashes:
+                    yield hashobj[0], hashobj[1]
+
+        revlist.wait()
+
+
+    def _managed_files(self, rev=None, full_history=False):
+        '''
+        Finds managed files in the specified revision
+        '''
+        revlistgen = self._rev_list(rev=rev, full_history=full_history)
+        # Find any objects that are git-fat placeholders which are tracked in the repository
+        managed = {}
+        for objhash, objtype, size in revlistgen:
+            # files are of blob type
+            if objtype == 'blob' and int(size) == self._magiclen:
+                # Read the actual file contents
+                readfile = git(['cat-file', '-p', objhash], stdout=sub.PIPE)
+                digest = self._get_digest(readfile.stdout)
+                if digest:
+                    managed[objhash] = digest
+
+        # go through rev-list again to get the filenames
+        # Again, I tried avoiding making another call to rev-list by caching the
+        # filenames above, but was running into the memory buffer issue
+        # Instead we just make another call to rev-list.  Takes more time, but still
+        # only takes 5 seconds to traverse the entire history of a 22k commit repo
+        filedict = dict(self._find_paths(managed.keys(), rev=rev, full_history=full_history))
 
         # return a dict(git-fat hash -> filename)
         # git's objhash are the keys in `managed` and `filedict`
@@ -455,6 +477,26 @@ class GitFat(object):
         Public command to do the smudge (should only be called by git)
         '''
         self._filter_smudge(sys.stdin, sys.stdout)
+
+    def show_objects(self, **kwargs):
+        '''
+        List all objects by size
+        '''
+
+    def find(self, size, **kwargs):
+        '''
+        Find any files over size threshold in the repository.
+        '''
+        revlistgen = self._rev_list(full_history=True)
+        # Find any objects that are git-fat placeholders which are tracked in the repository
+        objsizedict = {}
+        for objhash, objtype, objsize in revlistgen:
+            # files are of blob type
+            if objtype == 'blob' and int(objsize) > size:
+                objsizedict[objhash] = objsize
+                # print(objhash, objsize)
+        for objhash, objpath in self._find_paths(objsizedict.keys(), full_history=True):
+            print(objhash, objsizedict[objhash], objpath)
 
     def list_files(self, **kwargs):
         '''
@@ -654,6 +696,10 @@ def main():
 
     parser_checkout = subparser.add_parser('checkout', help='resmudge all orphan objects')
     parser_checkout.set_defaults(func=fat.checkout)
+
+    parser_find = subparser.add_parser('find', help='find all objects over [size]')
+    parser_find.add_argument("size", type=int, help='threshold size in bytes')
+    parser_find.set_defaults(func=fat.find)
 
     parser_status = subparser.add_parser('status', help='print orphan and stale objects')
     parser_status.set_defaults(func=fat.status)
