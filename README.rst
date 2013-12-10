@@ -120,6 +120,13 @@ Orphans are files that exist as placeholders in the working copy. Stale
 files are files that are in the ``.git/fat/objects`` directory, but have
 no working copy associated with them (e.g. old versions of files).
 
+To find files over a certain size, use git fat find. This example finds
+all objects greater than 10MB in git's database and prints them out.
+
+::
+
+    git fat find 10485760
+
 Implementation notes
 --------------------
 
@@ -142,6 +149,61 @@ fat store.
 To setup an http server to accept ``git-fat`` requests, just configure a
 webserver to have a url serve up the ``git-fat`` directory on the
 server, and point the ``.gitfat`` http remote to that url.
+
+Retroactive Import
+------------------
+
+You can retroactively import a repository to ``git-fat`` using a combination
+of ``find`` and ``index-filter`` used with git's ``filter-branch`` command.
+
+::
+
+    darthurdent at betelgeuse in /tmp/git-fat-demo (master)
+    $ git fat find 5123123
+    761a63bf287867da92eb420fca515363c4b02ad1 9437184 flowerpot.tar.gz
+    6c5d4031e03408e34ae476c5053ee497a91ac37b 10485760 whale.tar.gz
+
+    darthurdent at betelgeuse in /tmp/git-fat-demo (master)
+    $ git fat find 5123123 | cut -d' ' -f3- > /tmp/towel
+
+    darthurdent at betelgeuse in /tmp/git-fat-demo (master)
+    $ cat /tmp/towel
+    flowerpot.tar.gz
+    whale.tar.gz
+
+    darthurdent at betelgeuse in /tmp/git-fat-demo (master)
+    $ ll
+    total 19M
+    drwxrwxr-x 3 darthurdent darthurdent 4.0K Dec 10 13:42 .
+    drwxrwxrwt 6 root         root          76K Dec 10 13:42 ..
+    drwxrwxr-x 6 darthurdent darthurdent 4.0K Dec 10 13:42 .git
+    -rw-r--r-- 1 darthurdent darthurdent 9.0M Dec 10 13:37 flowerpot.tar.gz
+    -rw-r--r-- 1 darthurdent darthurdent  10M Dec 10 13:37 whale.tar.gz
+
+    darthurdent at betelgeuse in /tmp/git-fat-demo (master)
+    $ git filter-branch --index-filter 'git fat index-filter /tmp/towel'\
+        --tag-name-filter cat -- --all
+    Rewrite 28cfba441aac92992c3f80dae97cd1c19b3befad (2/2)
+    Ref 'refs/heads/master' was rewritten
+
+    darthurdent at betelgeuse in /tmp/git-fat-demo (master)
+    $ ll
+    total 19M
+    drwxrwxr-x 3 darthurdent darthurdent 4.0K Dec 10 13:42 .
+    drwxrwxrwt 6 root         root          76K Dec 10 13:42 ..
+    drwxrwxr-x 6 darthurdent darthurdent 4.0K Dec 10 13:42 .git
+    -rw-rw-r-- 1 darthurdent darthurdent   64 Dec 10 13:42 .gitattributes
+    -rw-rw-r-- 1 darthurdent darthurdent 9.0M Dec 10 13:42 flowerpot.tar.gz
+    -rw-rw-r-- 1 darthurdent darthurdent  10M Dec 10 13:42 whale.tar.gz
+
+    darthurdent at betelgeuse in /tmp/git-fat-demo (master)
+    $ cat .gitattributes
+    flowerpot.tar.gz filter=fat -text
+    whale.tar.gz filter=fat -text
+
+    darthurdent at betelgeuse in /tmp/git-fat-demo (master)
+    $ git cat-file -p $(git hash-object whale.tar.gz)
+    #$# git-fat 8c206a1a87599f532ce68675536f0b1546900d7a             10485760
 
 Related projects
 ----------------
