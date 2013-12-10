@@ -37,6 +37,8 @@ except ImportError:
 
     sub.check_output = backport_check_output
 
+__version__ = '0.1.1'
+
 BLOCK_SIZE = 4096
 
 
@@ -307,16 +309,18 @@ class GitFat(object):
         objs_dict = self._managed_files(**kwargs)
         return set(objs_dict.keys())
 
-    def _managed_files(self, rev=None, full_history=False):
+    def _rev_list(self, rev=None, full_history=False):
         '''
-        Finds managed files in the specified revision
+        Generator for objects in rev. Returns (hash, type, size) tuple.
         '''
+
         rev = rev or 'HEAD'
         # full_history implies --all
         args = ['--all'] if full_history else ['--no-walk', rev]
 
         # Get all the git objects in the current revision and in history if --all is specified
-        revlist = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
+        # -g ensures that we're only searching reachable commits
+        revlist = git('rev-list -g --objects'.split() + args, stdout=sub.PIPE)
         # Grab only the first column.  Tried doing this in python but because of the way that
         # subprocess.PIPE buffering works, I was running into memory issues with larger repositories
         # plugging pipes to other subprocesses appears to not have the memory buffer issue
@@ -324,10 +328,42 @@ class GitFat(object):
         # Read the objects and print <sha> <type> <size>
         catfile = git('cat-file --batch-check'.split(), stdin=awk.stdout, stdout=sub.PIPE)
 
-        # Find any objects that are git-fat placeholders which are tracked in the repository
-        managed = {}
         for line in catfile.stdout:
             objhash, objtype, size = line.split()
+            yield objhash, objtype, size
+
+        catfile.wait()
+
+    def _find_paths(self, hashes, rev=None, full_history=False):
+        '''
+        Takes a list of git object hashes and generates hash,path tuples
+        '''
+        rev = rev or 'HEAD'
+        # full_history implies --all
+        args = ['--all'] if full_history else ['--no-walk', rev]
+
+        revlist = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
+        for line in revlist.stdout:
+            hashobj = line.strip()
+            # Revlist prints all objects (commits, trees, blobs) but blobs have the file path
+            # next to the git objecthash
+            # Handle files with spaces
+            hashobj, _, filename = hashobj.partition(' ')
+            if filename:
+                # If the object is one we're managing
+                if hashobj in hashes:
+                    yield hashobj, filename
+
+        revlist.wait()
+
+    def _managed_files(self, rev=None, full_history=False):
+        '''
+        Finds managed files in the specified revision
+        '''
+        revlistgen = self._rev_list(rev=rev, full_history=full_history)
+        # Find any objects that are git-fat placeholders which are tracked in the repository
+        managed = {}
+        for objhash, objtype, size in revlistgen:
             # files are of blob type
             if objtype == 'blob' and int(size) == self._magiclen:
                 # Read the actual file contents
@@ -335,27 +371,13 @@ class GitFat(object):
                 digest = self._get_digest(readfile.stdout)
                 if digest:
                     managed[objhash] = digest
-        catfile.wait()
 
         # go through rev-list again to get the filenames
         # Again, I tried avoiding making another call to rev-list by caching the
         # filenames above, but was running into the memory buffer issue
         # Instead we just make another call to rev-list.  Takes more time, but still
         # only takes 5 seconds to traverse the entire history of a 22k commit repo
-        filedict = {}
-        revlist2 = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
-        for line in revlist2.stdout:
-            hashobj = line.strip()
-            # Revlist prints all objects (commits, trees, blobs) but blobs have the file path
-            # next to the git objecthash
-            # 40 + 1 for hash + space
-            if len(hashobj) > 41:
-                # Handle files with spaces
-                hashobj = hashobj[:40], hashobj[41:]
-                # If the object is one we're managing
-                if hashobj[0] in managed.keys():
-                    filedict[hashobj[0]] = hashobj[1]
-        revlist2.wait()
+        filedict = dict(self._find_paths(managed.keys(), rev=rev, full_history=full_history))
 
         # return a dict(git-fat hash -> filename)
         # git's objhash are the keys in `managed` and `filedict`
@@ -455,6 +477,93 @@ class GitFat(object):
         Public command to do the smudge (should only be called by git)
         '''
         self._filter_smudge(sys.stdin, sys.stdout)
+
+    def show_objects(self, **kwargs):
+        '''
+        List all objects by size
+        '''
+
+    def find(self, size, **kwargs):
+        '''
+        Find any files over size threshold in the repository.
+        '''
+        revlistgen = self._rev_list(full_history=True)
+        # Find any objects that are git-fat placeholders which are tracked in the repository
+        objsizedict = {}
+        for objhash, objtype, objsize in revlistgen:
+            # files are of blob type
+            if objtype == 'blob' and int(objsize) > size:
+                objsizedict[objhash] = objsize
+                # print(objhash, objsize)
+        for objhash, objpath in self._find_paths(objsizedict.keys(), full_history=True):
+            print(objhash, objsizedict[objhash], objpath)
+
+    def _parse_ls_files(self, line):
+        mode, _, tail = line.partition(' ')
+        blobhash, _, tail = tail.partition(' ')
+        stageno, _, tail = tail.partition('\t')
+        filename = tail.strip()
+        return mode, blobhash, stageno, filename
+
+    def index_filter(self, filelist, add_gitattributes=True, **kwargs):
+
+        workdir = os.path.join(self.gitdir, 'fat', 'index-filter')
+        mkdir_p(workdir)
+
+        with open(filelist) as f:
+            files_to_exclude = f.read().splitlines()
+
+        ls_files = git('ls-files -s'.split(), stdout=sub.PIPE)
+        update_index = git('update-index --index-info'.split(), stdin=sub.PIPE)
+        lsfmt = '{} {} {}\t{}\n'
+
+        newfiles = []
+        for line in ls_files.stdout:
+            mode, blobhash, stageno, filename = self._parse_ls_files(line)
+
+            if filename not in files_to_exclude or mode == "120000":
+                continue
+            # Save file to update .gitattributes
+            newfiles.append(filename)
+            cleanedobj_hash = os.path.join(workdir, blobhash)
+            # if it hasn't already been cleaned
+            if not os.path.exists(cleanedobj_hash):
+                catfile = git('cat-file blob {}'.format(blobhash).split(), stdout=sub.PIPE)
+                hashobj = git('hash-object -w --stdin'.split(), stdin=sub.PIPE, stdout=sub.PIPE)
+                self._filter_clean(catfile.stdout, hashobj.stdin)
+                hashobj.stdin.close()
+                objhash = hashobj.stdout.read().strip()
+                catfile.wait()
+                hashobj.wait()
+                with open(cleanedobj_hash, 'w') as f:
+                    f.write(objhash + '\n')
+            else:
+                with open(cleanedobj_hash) as f:
+                    objhash = f.read().strip()
+            # Write the placeholder to the index
+            update_index.stdin.write(lsfmt.format(mode, objhash, stageno, filename))
+
+        if add_gitattributes:
+            ls_ga = git('ls-files -s .gitattributes'.split(), stdout=sub.PIPE)
+            lsout = ls_ga.stdout.read().strip()
+            ls_ga.wait()
+            if lsout:  # Always try to get the old gitattributes
+                ga_mode, ga_hash, ga_stno, ga_filename = self._parse_ls_files(lsout)
+                ga_cat = git('cat-file blob {}'.format(ga_hash).split(), stdout=sub.PIPE)
+                old_ga = ga_cat.stdout.read().splitlines()
+                ga_cat.wait()
+            else:
+                ga_mode, ga_stno, old_ga = '100644', '0', []
+            ga_hashobj = git('hash-object -w --stdin'.split(), stdin=sub.PIPE,
+                stdout=sub.PIPE)
+            new_ga = old_ga + ['{} filter=fat -text'.format(f) for f in newfiles]
+            stdout, stderr = ga_hashobj.communicate('\n'.join(new_ga) + '\n')
+            update_index.stdin.write(lsfmt.format(ga_mode, stdout.strip(),
+                ga_stno, '.gitattributes'))
+
+        ls_files.wait()
+        update_index.stdin.close()
+        update_index.wait()
 
     def list_files(self, **kwargs):
         '''
@@ -616,6 +725,10 @@ class GitFat(object):
         ''' NOT IMPLEMENTED '''
         pass
 
+    def version(self, **kwargs):
+        ''' Print version information '''
+        print(__version__)
+
 
 def main():
 
@@ -623,46 +736,74 @@ def main():
 
     fat = GitFat()
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(usage=("%(prog)s [global options] command [command options]\n"
+        "       %(prog)s -h for full usage."))  # Six spaces for len('usage: ')
     subparser = parser.add_subparsers()
 
     parser.add_argument('-a', "--full-history", dest='full_history', action='store_true',
         help='Look for git-fat placeholder files in the entire history instead of just the working copy')
-
     parser.add_argument('-v', "--verbose", dest='verbose', action='store_true',
         help='Verbose output')
 
     # Empty function for legacy api; config gets called every time
     # (assuming if user is calling git-fat they want it configured)
-    parser_init = subparser.add_parser('init', help='Initialize git-fat')
+    parser_init = subparser.add_parser('init',
+        help='Initialize git-fat')
     parser_init.set_defaults(func=empty)
 
-    parser_filter_clean = subparser.add_parser('filter-clean', help='filter-clean to be called only by git')
+    parser_version = subparser.add_parser('version',
+        help='Print version info')
+    parser_version.set_defaults(func=fat.version)
+
+    parser_filter_clean = subparser.add_parser('filter-clean',
+        help='filter-clean to be called only by git')
     parser_filter_clean.add_argument("cur_file", nargs="?")
     parser_filter_clean.set_defaults(func=fat.filter_clean)
 
-    parser_filter_smudge = subparser.add_parser('filter-smudge', help='filter-smudge to be called only by git')
+    parser_filter_smudge = subparser.add_parser('filter-smudge',
+        help='filter-smudge to be called only by git')
     parser_filter_smudge.add_argument("cur_file", nargs="?")  # Currently unused
     parser_filter_smudge.set_defaults(func=fat.filter_smudge)
 
-    parser_push = subparser.add_parser('push', help='push cache to remote git-fat server')
+    parser_push = subparser.add_parser('push',
+        help='push cache to remote git-fat server')
     parser_push.set_defaults(func=fat.push)
 
-    parser_pull = subparser.add_parser('pull', help='pull fatfiles from remote git-fat server')
-    parser_pull.add_argument("pattern", nargs="?", help='pull only files matching pattern')
+    parser_pull = subparser.add_parser('pull',
+        help='pull fatfiles from remote git-fat server')
+    parser_pull.add_argument("pattern", nargs="?",
+        help='pull only files matching pattern')
     parser_pull.set_defaults(func=fat.pull)
 
-    parser_checkout = subparser.add_parser('checkout', help='resmudge all orphan objects')
+    parser_checkout = subparser.add_parser('checkout',
+        help='resmudge all orphan objects')
     parser_checkout.set_defaults(func=fat.checkout)
 
-    parser_status = subparser.add_parser('status', help='print orphan and stale objects')
+    parser_find = subparser.add_parser('find',
+        help='find all objects over [size]')
+    parser_find.add_argument("size", type=int,
+        help='threshold size in bytes')
+    parser_find.set_defaults(func=fat.find)
+
+    parser_status = subparser.add_parser('status',
+        help='print orphan and stale objects')
     parser_status.set_defaults(func=fat.status)
 
-    parser_list = subparser.add_parser('list', help='list all files managed by git-fat')
+    parser_list = subparser.add_parser('list',
+        help='list all files managed by git-fat')
     parser_list.set_defaults(func=fat.list_files)
 
-    parser_list = subparser.add_parser('pull-http', help='anonymously download git-fat files over http')
+    parser_list = subparser.add_parser('pull-http',
+        help='anonymously download git-fat files over http')
     parser_list.set_defaults(func=fat.http_pull)
+
+    parser_index_filter = subparser.add_parser('index-filter',
+        help='git fat index-filter for filter-branch')
+    parser_index_filter.add_argument('filelist',
+        help='file containing all files to import to git-fat')
+    parser_index_filter.add_argument('-x', dest='add_gitattributes',
+        help='prevent adding excluded to .gitattributes', action='store_false')
+    parser_index_filter.set_defaults(func=fat.index_filter)
 
     args = parser.parse_args()
 
@@ -685,3 +826,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+__all__ = ['__version__', 'main', 'GitFat']
