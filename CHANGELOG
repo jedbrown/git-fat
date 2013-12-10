@@ -4,3 +4,11 @@
 IMPROVEMENTS
 
 - Backwards compatibility with jedbrown's original git-fat format.
+
+0.2.0
+-----
+
+FEATURES
+
+- Re-Implemented jedbrown's index-filter and find functions
+- Added version command to check the current version
