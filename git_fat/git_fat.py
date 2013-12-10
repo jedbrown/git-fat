@@ -37,6 +37,8 @@ except ImportError:
 
     sub.check_output = backport_check_output
 
+__version__ = '0.1.1'
+
 BLOCK_SIZE = 4096
 
 
@@ -724,6 +726,10 @@ class GitFat(object):
         ''' NOT IMPLEMENTED '''
         pass
 
+    def version(self, **kwargs):
+        ''' Print version information '''
+        print(__version__)
+
 
 def main():
 
@@ -736,7 +742,6 @@ def main():
 
     parser.add_argument('-a', "--full-history", dest='full_history', action='store_true',
         help='Look for git-fat placeholder files in the entire history instead of just the working copy')
-
     parser.add_argument('-v', "--verbose", dest='verbose', action='store_true',
         help='Verbose output')
 
@@ -744,6 +749,9 @@ def main():
     # (assuming if user is calling git-fat they want it configured)
     parser_init = subparser.add_parser('init', help='Initialize git-fat')
     parser_init.set_defaults(func=empty)
+
+    parser_version = subparser.add_parser('version', help='Print version info')
+    parser_version.set_defaults(func=fat.version)
 
     parser_filter_clean = subparser.add_parser('filter-clean', help='filter-clean to be called only by git')
     parser_filter_clean.add_argument("cur_file", nargs="?")
@@ -802,3 +810,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+__all__ = ['__version__', 'main', 'GitFat']
