@@ -356,7 +356,6 @@ class GitFat(object):
 
         revlist.wait()
 
-
     def _managed_files(self, rev=None, full_history=False):
         '''
         Finds managed files in the specified revision
@@ -748,46 +747,62 @@ def main():
 
     # Empty function for legacy api; config gets called every time
     # (assuming if user is calling git-fat they want it configured)
-    parser_init = subparser.add_parser('init', help='Initialize git-fat')
+    parser_init = subparser.add_parser('init',
+        help='Initialize git-fat')
     parser_init.set_defaults(func=empty)
 
-    parser_version = subparser.add_parser('version', help='Print version info')
+    parser_version = subparser.add_parser('version',
+        help='Print version info')
     parser_version.set_defaults(func=fat.version)
 
-    parser_filter_clean = subparser.add_parser('filter-clean', help='filter-clean to be called only by git')
+    parser_filter_clean = subparser.add_parser('filter-clean',
+        help='filter-clean to be called only by git')
     parser_filter_clean.add_argument("cur_file", nargs="?")
     parser_filter_clean.set_defaults(func=fat.filter_clean)
 
-    parser_filter_smudge = subparser.add_parser('filter-smudge', help='filter-smudge to be called only by git')
+    parser_filter_smudge = subparser.add_parser('filter-smudge',
+        help='filter-smudge to be called only by git')
     parser_filter_smudge.add_argument("cur_file", nargs="?")  # Currently unused
     parser_filter_smudge.set_defaults(func=fat.filter_smudge)
 
-    parser_push = subparser.add_parser('push', help='push cache to remote git-fat server')
+    parser_push = subparser.add_parser('push',
+        help='push cache to remote git-fat server')
     parser_push.set_defaults(func=fat.push)
 
-    parser_pull = subparser.add_parser('pull', help='pull fatfiles from remote git-fat server')
-    parser_pull.add_argument("pattern", nargs="?", help='pull only files matching pattern')
+    parser_pull = subparser.add_parser('pull',
+        help='pull fatfiles from remote git-fat server')
+    parser_pull.add_argument("pattern", nargs="?",
+        help='pull only files matching pattern')
     parser_pull.set_defaults(func=fat.pull)
 
-    parser_checkout = subparser.add_parser('checkout', help='resmudge all orphan objects')
+    parser_checkout = subparser.add_parser('checkout',
+        help='resmudge all orphan objects')
     parser_checkout.set_defaults(func=fat.checkout)
 
-    parser_find = subparser.add_parser('find', help='find all objects over [size]')
-    parser_find.add_argument("size", type=int, help='threshold size in bytes')
+    parser_find = subparser.add_parser('find',
+        help='find all objects over [size]')
+    parser_find.add_argument("size", type=int,
+        help='threshold size in bytes')
     parser_find.set_defaults(func=fat.find)
 
-    parser_status = subparser.add_parser('status', help='print orphan and stale objects')
+    parser_status = subparser.add_parser('status',
+        help='print orphan and stale objects')
     parser_status.set_defaults(func=fat.status)
 
-    parser_list = subparser.add_parser('list', help='list all files managed by git-fat')
+    parser_list = subparser.add_parser('list',
+        help='list all files managed by git-fat')
     parser_list.set_defaults(func=fat.list_files)
 
-    parser_list = subparser.add_parser('pull-http', help='anonymously download git-fat files over http')
+    parser_list = subparser.add_parser('pull-http',
+        help='anonymously download git-fat files over http')
     parser_list.set_defaults(func=fat.http_pull)
 
-    parser_index_filter = subparser.add_parser('index-filter', help='git fat index-filter for filter-branch')
-    parser_index_filter.add_argument('filelist', help='file containing all files to import to git-fat')
-    parser_index_filter.add_argument('-x', dest='add_gitattributes', help='prevent adding excluded to .gitattributes', action='store_false')
+    parser_index_filter = subparser.add_parser('index-filter',
+        help='git fat index-filter for filter-branch')
+    parser_index_filter.add_argument('filelist',
+        help='file containing all files to import to git-fat')
+    parser_index_filter.add_argument('-x', dest='add_gitattributes',
+        help='prevent adding excluded to .gitattributes', action='store_false')
     parser_index_filter.set_defaults(func=fat.index_filter)
 
     args = parser.parse_args()

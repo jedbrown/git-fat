@@ -219,5 +219,8 @@ Improvements
 ------------
 
 -  More friendly configuration for multiple fat remotes
--  Private setting of a different remote.
+-  Private setting of a different remote. (e.g. local mirrors)
+-  Generic backend interface
+-  Better Documentation
+-  Improved Testing
 
