@@ -737,7 +737,8 @@ def main():
 
     fat = GitFat()
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(usage=("%(prog)s [global options] command [command options]\n"
+        "       %(prog)s -h for full usage."))  # Six spaces for len('usage: ')
     subparser = parser.add_subparsers()
 
     parser.add_argument('-a', "--full-history", dest='full_history', action='store_true',
