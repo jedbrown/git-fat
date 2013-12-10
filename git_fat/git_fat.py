@@ -345,13 +345,12 @@ class GitFat(object):
             hashobj = line.strip()
             # Revlist prints all objects (commits, trees, blobs) but blobs have the file path
             # next to the git objecthash
-            # 40 + 1 for hash + space
-            if len(hashobj) > 41:
-                # Handle files with spaces
-                hashobj = hashobj[:40], hashobj[41:]
+            # Handle files with spaces
+            hashobj, _, filename = hashobj.partition(' ')
+            if filename:
                 # If the object is one we're managing
-                if hashobj[0] in hashes:
-                    yield hashobj[0], hashobj[1]
+                if hashobj in hashes:
+                    yield hashobj, filename
 
         revlist.wait()
 
@@ -497,6 +496,73 @@ class GitFat(object):
                 # print(objhash, objsize)
         for objhash, objpath in self._find_paths(objsizedict.keys(), full_history=True):
             print(objhash, objsizedict[objhash], objpath)
+
+    def _parse_ls_files(self, line):
+        mode, _, tail = line.partition(' ')
+        blobhash, _, tail = tail.partition(' ')
+        stageno, _, tail = tail.partition('\t')
+        filename = tail.strip()
+        return mode, blobhash, stageno, filename
+
+    def index_filter(self, filelist, add_gitattributes=True, **kwargs):
+
+        workdir = os.path.join(self.gitdir, 'fat', 'index-filter')
+        mkdir_p(workdir)
+
+        with open(filelist) as f:
+            files_to_exclude = f.read().splitlines()
+
+        ls_files = git('ls-files -s'.split(), stdout=sub.PIPE)
+        update_index = git('update-index --index-info'.split(), stdin=sub.PIPE)
+        lsfmt = '{} {} {}\t{}\n'
+
+        newfiles = []
+        for line in ls_files.stdout:
+            mode, blobhash, stageno, filename = self._parse_ls_files(line)
+
+            if filename not in files_to_exclude or mode == "120000":
+                continue
+            # Save file to update .gitattributes
+            newfiles.append(filename)
+            cleanedobj_hash = os.path.join(workdir, blobhash)
+            # if it hasn't already been cleaned
+            if not os.path.exists(cleanedobj_hash):
+                catfile = git('cat-file blob {}'.format(blobhash).split(), stdout=sub.PIPE)
+                hashobj = git('hash-object -w --stdin'.split(), stdin=sub.PIPE, stdout=sub.PIPE)
+                self._filter_clean(catfile.stdout, hashobj.stdin)
+                hashobj.stdin.close()
+                objhash = hashobj.stdout.read().strip()
+                catfile.wait()
+                hashobj.wait()
+                with open(cleanedobj_hash, 'w') as f:
+                    f.write(objhash + '\n')
+            else:
+                with open(cleanedobj_hash) as f:
+                    objhash = f.read().strip()
+            # Write the placeholder to the index
+            update_index.stdin.write(lsfmt.format(mode, objhash, stageno, filename))
+
+        if add_gitattributes:
+            ls_ga = git('ls-files -s .gitattributes'.split(), stdout=sub.PIPE)
+            lsout = ls_ga.stdout.read().strip()
+            ls_ga.wait()
+            if lsout:  # Always try to get the old gitattributes
+                ga_mode, ga_hash, ga_stno, ga_filename = self._parse_ls_files(lsout)
+                ga_cat = git('cat-file blob {}'.format(ga_hash).split(), stdout=sub.PIPE)
+                old_ga = ga_cat.stdout.read().splitlines()
+                ga_cat.wait()
+            else:
+                ga_mode, ga_stno, old_ga = '100644', '0', []
+            ga_hashobj = git('hash-object -w --stdin'.split(), stdin=sub.PIPE,
+                stdout=sub.PIPE)
+            new_ga = old_ga + ['{} filter=fat -text'.format(f) for f in newfiles]
+            stdout, stderr = ga_hashobj.communicate('\n'.join(new_ga) + '\n')
+            update_index.stdin.write(lsfmt.format(ga_mode, stdout.strip(),
+                ga_stno, '.gitattributes'))
+
+        ls_files.wait()
+        update_index.stdin.close()
+        update_index.wait()
 
     def list_files(self, **kwargs):
         '''
@@ -709,6 +775,11 @@ def main():
 
     parser_list = subparser.add_parser('pull-http', help='anonymously download git-fat files over http')
     parser_list.set_defaults(func=fat.http_pull)
+
+    parser_index_filter = subparser.add_parser('index-filter', help='git fat index-filter for filter-branch')
+    parser_index_filter.add_argument('filelist', help='file containing all files to import to git-fat')
+    parser_index_filter.add_argument('-x', dest='add_gitattributes', help='prevent adding excluded to .gitattributes', action='store_false')
+    parser_index_filter.set_defaults(func=fat.index_filter)
 
     args = parser.parse_args()
 
