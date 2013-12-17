@@ -156,12 +156,26 @@ Retroactive Import
 You can retroactively import a repository to ``git-fat`` using a combination
 of ``find`` and ``index-filter`` used with git's ``filter-branch`` command.
 
+Before you do this, make sure you understand the consequences of
+`rewriting history <http://git-scm.com/book/ch6-4.html>`_ and be sure to
+backup your repository before starting.
+
+First, clone the repository and find all the large files with the
+``git fat find`` command.
+
 ::
 
     darthurdent at betelgeuse in /tmp/git-fat-demo (master)
     $ git fat find 5123123
     761a63bf287867da92eb420fca515363c4b02ad1 9437184 flowerpot.tar.gz
     6c5d4031e03408e34ae476c5053ee497a91ac37b 10485760 whale.tar.gz
+
+
+Review the files and make sure that they're what you want to exclude from the
+repository.  If the list looks good, put the filenames into another file that
+will be read from during ``filter-branch``.
+
+::
 
     darthurdent at betelgeuse in /tmp/git-fat-demo (master)
     $ git fat find 5123123 | cut -d' ' -f3- > /tmp/towel
@@ -180,11 +194,20 @@ of ``find`` and ``index-filter`` used with git's ``filter-branch`` command.
     -rw-r--r-- 1 darthurdent darthurdent 9.0M Dec 10 13:37 flowerpot.tar.gz
     -rw-r--r-- 1 darthurdent darthurdent  10M Dec 10 13:37 whale.tar.gz
 
+Do the ``filter-branch`` using ``git fat index-filter`` as the index filter.
+Pass in the filename containing the paths to files you want to exclude.
+
+::
+
     darthurdent at betelgeuse in /tmp/git-fat-demo (master)
     $ git filter-branch --index-filter 'git fat index-filter /tmp/towel'\
         --tag-name-filter cat -- --all
     Rewrite 28cfba441aac92992c3f80dae97cd1c19b3befad (2/2)
     Ref 'refs/heads/master' was rewritten
+
+Review the changes made to the repository.
+
+::
 
     darthurdent at betelgeuse in /tmp/git-fat-demo (master)
     $ ll
@@ -204,6 +227,15 @@ of ``find`` and ``index-filter`` used with git's ``filter-branch`` command.
     darthurdent at betelgeuse in /tmp/git-fat-demo (master)
     $ git cat-file -p $(git hash-object whale.tar.gz)
     #$# git-fat 8c206a1a87599f532ce68675536f0b1546900d7a             10485760
+
+Remove all the old and dangling references by doing a clone of the repository
+you just cleaned.  The ``file://`` uri is
+`important <http://git-scm.com/book/ch4-1.html>`_ here.
+
+::
+
+    darthurdent at betelgeuse in /tmp/git-fat-demo (master)
+    $ cd .. && git clone file://git-fat-demo git-fat-clean
 
 Related projects
 ----------------
