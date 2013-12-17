@@ -19,3 +19,10 @@ FEATURES
 BUGFIXES
 
 - Fixed regression that caused old files to be converted in filter-clean
+
+0.2.2
+-----
+
+BUGFIXES
+
+- Fixed issue that prevented files from being found with the find command.
