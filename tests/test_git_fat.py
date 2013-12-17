@@ -227,6 +227,41 @@ class GitFatTest(unittest.TestCase):
 
         out = git('fat status')
 
+    def test_git_fat_regression(self):
+
+        git('init {}'.format(self.repo1))
+        os.chdir(self.repo1)
+
+        # Test that existing files don't get converted
+        with open('f.fat', 'w') as f:
+            f.write('a' * 100)
+
+        git('add f.fat')
+        git(['commit', '-madded legacy file'])
+
+        out = git('fat init')
+        expect = 'Setting filters in .git/config\nCreating .git/fat/objects\nInitialized git-fat'.strip()
+        self.assertEqual(out.strip(), expect)
+        self.assertTrue('objects' in os.listdir('.git/fat/'))
+
+        with open('.gitfat', 'w') as f:
+            f.write('[rsync]\nremote=localhost:{}'.format(self.fatstore))
+
+        with open('.gitattributes', 'w') as f:
+            f.write('*.fat filter=fat -crlf')
+
+        git('add .gitattributes .gitfat')
+        git(['commit', '-m"new repository'])
+
+        contents = 'This is a fat file\n'
+        with open('a.fat', 'w') as f:
+            f.write(contents)
+
+        git('add a.fat')
+        git(['commit', '-madded fatfile'])
+
+        self.assertTrue('f.fat' not in git('status'))
+
 
 if __name__ == '__main__':
 

@@ -465,12 +465,13 @@ class GitFat(object):
                 "Not adding: {}\n".format(cur_file) +
                 "It is not a new file and is not managed by git-fat"
             )
+            # Git needs something, so we cat stdin to stdout
             cat(sys.stdin, sys.stdout)
+        else:  # We clean the file
+            if (cur_file):
+                self.verbose("Adding {}".format(cur_file))
 
-        if (cur_file):
-            self.verbose("Adding {}".format(cur_file))
-
-        self._filter_clean(sys.stdin, sys.stdout)
+            self._filter_clean(sys.stdin, sys.stdout)
 
     def filter_smudge(self, **kwargs):
         '''
