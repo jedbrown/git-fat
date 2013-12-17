@@ -37,7 +37,7 @@ def git(cliargs, *args, **kwargs):
 
 class GitFatTest(unittest.TestCase):
 
-    def setUp(self):
+    def setUp(self):  # noqa
 
         self.tempdir = tempfile.mkdtemp(prefix='git-fat-test')
         self.olddir = os.getcwd()
@@ -48,7 +48,7 @@ class GitFatTest(unittest.TestCase):
         self.repo2 = os.path.join(self.tempdir, 'fat-test2')
         self.repos = [self.repo1, self.repo2]
 
-    def tearDown(self):
+    def tearDown(self):  # noqa
 
         # move all the coverage files
         for r, d, files in os.walk(self.tempdir):

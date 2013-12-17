@@ -319,8 +319,7 @@ class GitFat(object):
         args = ['--all'] if full_history else ['--no-walk', rev]
 
         # Get all the git objects in the current revision and in history if --all is specified
-        # -g ensures that we're only searching reachable commits
-        revlist = git('rev-list -g --objects'.split() + args, stdout=sub.PIPE)
+        revlist = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
         # Grab only the first column.  Tried doing this in python but because of the way that
         # subprocess.PIPE buffering works, I was running into memory issues with larger repositories
         # plugging pipes to other subprocesses appears to not have the memory buffer issue
@@ -479,11 +478,6 @@ class GitFat(object):
         '''
         self._filter_smudge(sys.stdin, sys.stdout)
 
-    def show_objects(self, **kwargs):
-        '''
-        List all objects by size
-        '''
-
     def find(self, size, **kwargs):
         '''
         Find any files over size threshold in the repository.
@@ -495,7 +489,6 @@ class GitFat(object):
             # files are of blob type
             if objtype == 'blob' and int(objsize) > size:
                 objsizedict[objhash] = objsize
-                # print(objhash, objsize)
         for objhash, objpath in self._find_paths(objsizedict.keys(), full_history=True):
             print(objhash, objsizedict[objhash], objpath)
 
