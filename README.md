@@ -27,7 +27,7 @@ Edit `.gitattributes` to regard any desired extensions as fat files.
     *.gz  filter=fat -crlf
     ^D
 
-Run `git fat init` to active the extension. Now add and commit as usual.
+Run `git fat init` to activate the extension. Now add and commit as usual.
 Matched files will be transparently stored externally, but will appear
 complete in the working tree.
 
@@ -104,7 +104,7 @@ Now let's push our fat files using the rsync configuration that we set up earlie
     sent 61 bytes  received 12 bytes  48.67 bytes/sec
     total size is 6449  speedup is 88.34
 
-We we might normally set a remote now and push the git repository.
+We might normally set a remote now and push the git repository.
 
 ## Cloning and pulling
 Now let's look at what happens when we clone.
