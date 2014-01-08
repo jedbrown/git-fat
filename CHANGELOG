@@ -26,3 +26,11 @@ BUGFIXES
 BUGFIXES
 
 - Fixed issue that prevented files from being found with the find command.
+
+0.2.3
+-----
+
+BUGFIXES
+
+- Fixed issue that can't allow to run system-wide installed ``git-fat`` script
+  under some types of isolated environments.
