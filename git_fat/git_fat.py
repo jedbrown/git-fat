@@ -719,14 +719,14 @@ class GitFat(object):
         ''' NOT IMPLEMENTED '''
         pass
 
-    def version(self, **kwargs):
-        ''' Print version information '''
-        print(__version__)
-
 
 def main():
 
     import argparse
+
+    if sys.argv[1] in [ c + 'version' for c in '','-','--']:
+        print(__version__)
+        sys.exit(0)
 
     fat = GitFat()
 
@@ -744,10 +744,6 @@ def main():
     parser_init = subparser.add_parser('init',
         help='Initialize git-fat')
     parser_init.set_defaults(func=empty)
-
-    parser_version = subparser.add_parser('version',
-        help='Print version info')
-    parser_version.set_defaults(func=fat.version)
 
     parser_filter_clean = subparser.add_parser('filter-clean',
         help='filter-clean to be called only by git')
