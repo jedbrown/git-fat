@@ -1,1 +1,1 @@
-from .git_fat import * # noqa
+from .git_fat import *  # noqa

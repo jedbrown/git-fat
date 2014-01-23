@@ -120,12 +120,12 @@ def http_get(baseurl, filename):
     ''' Returns file descriptor for http file stream, catches urllib2 errors '''
     import urllib2
     try:
-        print("Downloading: {}".format(filename))
+        print("Downloading: {0}".format(filename))
         geturl = '/'.join([baseurl, filename])
         res = urllib2.urlopen(geturl)
         return res.fp
     except urllib2.URLError as e:
-        error("WARN: " + e.reason + ': {}'.format(geturl))
+        error("WARN: " + e.reason + ': {0}'.format(geturl))
         return None
 
 
@@ -188,7 +188,7 @@ class GitFat(object):
 
         remote = gitconfig_get('rsync.remote', file=self.cfgpath)
         if not remote:
-            error('ERROR: No rsync.remote in {}'.format(self.cfgpath))
+            error('ERROR: No rsync.remote in {0}'.format(self.cfgpath))
             sys.exit(1)
 
         ssh_port = gitconfig_get('rsync.sshport', file=self.cfgpath)
@@ -205,7 +205,7 @@ class GitFat(object):
 
         remote = gitconfig_get('http.remote', file=self.cfgpath)
         if not remote:
-            error('ERROR: No http.remote in {}'.format(self.cfgpath))
+            error('ERROR: No http.remote in {0}'.format(self.cfgpath))
             sys.exit(1)
 
         if not remote.startswith('http') or remote.startswith('https'):
@@ -461,14 +461,14 @@ class GitFat(object):
         '''
         if cur_file and not self.can_clean_file(cur_file):
             self.verbose(
-                "Not adding: {}\n".format(cur_file) +
+                "Not adding: {0}\n".format(cur_file) +
                 "It is not a new file and is not managed by git-fat"
             )
             # Git needs something, so we cat stdin to stdout
             cat(sys.stdin, sys.stdout)
         else:  # We clean the file
             if (cur_file):
-                self.verbose("Adding {}".format(cur_file))
+                self.verbose("Adding {0}".format(cur_file))
 
             self._filter_clean(sys.stdin, sys.stdout)
 
@@ -509,7 +509,7 @@ class GitFat(object):
 
         ls_files = git('ls-files -s'.split(), stdout=sub.PIPE)
         update_index = git('update-index --index-info'.split(), stdin=sub.PIPE)
-        lsfmt = '{} {} {}\t{}\n'
+        lsfmt = '{0} {1} {2}\t{3}\n'
 
         newfiles = []
         for line in ls_files.stdout:
@@ -522,7 +522,7 @@ class GitFat(object):
             cleanedobj_hash = os.path.join(workdir, blobhash)
             # if it hasn't already been cleaned
             if not os.path.exists(cleanedobj_hash):
-                catfile = git('cat-file blob {}'.format(blobhash).split(), stdout=sub.PIPE)
+                catfile = git('cat-file blob {0}'.format(blobhash).split(), stdout=sub.PIPE)
                 hashobj = git('hash-object -w --stdin'.split(), stdin=sub.PIPE, stdout=sub.PIPE)
                 self._filter_clean(catfile.stdout, hashobj.stdin)
                 hashobj.stdin.close()
@@ -543,14 +543,14 @@ class GitFat(object):
             ls_ga.wait()
             if lsout:  # Always try to get the old gitattributes
                 ga_mode, ga_hash, ga_stno, ga_filename = self._parse_ls_files(lsout)
-                ga_cat = git('cat-file blob {}'.format(ga_hash).split(), stdout=sub.PIPE)
+                ga_cat = git('cat-file blob {0}'.format(ga_hash).split(), stdout=sub.PIPE)
                 old_ga = ga_cat.stdout.read().splitlines()
                 ga_cat.wait()
             else:
                 ga_mode, ga_stno, old_ga = '100644', '0', []
             ga_hashobj = git('hash-object -w --stdin'.split(), stdin=sub.PIPE,
                 stdout=sub.PIPE)
-            new_ga = old_ga + ['{} filter=fat -text'.format(f) for f in newfiles]
+            new_ga = old_ga + ['{0} filter=fat -text'.format(f) for f in newfiles]
             stdout, stderr = ga_hashobj.communicate('\n'.join(new_ga) + '\n')
             update_index.stdin.write(lsfmt.format(ga_mode, stdout.strip(),
                 ga_stno, '.gitattributes'))
@@ -601,7 +601,7 @@ class GitFat(object):
         This method prevents fat from hijacking glob matches that are old
         '''
         # If the file doesn't exist in the immediately previous revision, add it
-        showfile = git(['show', 'HEAD:{}'.format(filename)], stdout=sub.PIPE, stderr=sub.PIPE)
+        showfile = git(['show', 'HEAD:{0}'.format(filename)], stdout=sub.PIPE, stderr=sub.PIPE)
 
         blockiter, is_fatfile = self._decode(showfile.stdout)
 
@@ -634,7 +634,7 @@ class GitFat(object):
         if files:
             print("Pulling: ", list(files))
             rsync = self._rsync(push=False)
-            self.verbose('Executing: {}'.format(rsync))
+            self.verbose('Executing: {0}'.format(rsync))
             p = sub.Popen(rsync, stdin=sub.PIPE, preexec_fn=os.setsid)
             p.communicate(input='\x00'.join(files))
         else:
@@ -648,7 +648,7 @@ class GitFat(object):
         '''
         files = self._referenced_objects(**kwargs) & self._cached_objects()
         rsync = self._rsync(push=True)
-        self.verbose('Executing: {}'.format(rsync))
+        self.verbose('Executing: {0}'.format(rsync))
         p = sub.Popen(rsync, stdin=sub.PIPE)
         p.communicate(input='\x00'.join(files))
 
@@ -702,7 +702,7 @@ class GitFat(object):
 
             if digest != o:
                 # Should I retry?
-                error('ERROR: Downloaded digest ({}) did not match stored digest for orphan: {}'.format(digest, o))
+                error('ERROR: Downloaded digest ({0}) did not match stored digest for orphan: {1}'.format(digest, o))
                 os.remove(tmpname)
                 ret_code = 1
                 continue
