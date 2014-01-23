@@ -34,3 +34,14 @@ BUGFIXES
 
 - Fixed issue that can't allow to run system-wide installed ``git-fat`` script
   under some types of isolated environments.
+
+0.2.4
+-----
+
+IMPROVEMENTS
+
+- Ability to run ``git fat version`` outside of git repositories
+
+BUGFIXES
+
+- python 2.6 format string compatability
