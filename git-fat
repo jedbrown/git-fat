@@ -138,11 +138,12 @@ class GitFat(object):
         remote    = gitconfig_get('rsync.remote', file=cfgpath)
         ssh_port  = gitconfig_get('rsync.sshport', file=cfgpath)
         ssh_user  = gitconfig_get('rsync.sshuser', file=cfgpath)
+        options   = gitconfig_get('rsync.options', file=cfgpath)
         if remote is None:
             raise RuntimeError('No rsync.remote in %s' % cfgpath)
-        return remote, ssh_port, ssh_user
+        return remote, ssh_port, ssh_user, options
     def get_rsync_command(self,push):
-        (remote, ssh_port, ssh_user) = self.get_rsync()
+        (remote, ssh_port, ssh_user, options) = self.get_rsync()
         if push:
             self.verbose('Pushing to %s' % (remote))
         else:
@@ -156,6 +157,8 @@ class GitFat(object):
             rshopts += ' -p ' + ssh_port
         if rshopts:
             cmd.append('--rsh=ssh' + rshopts)
+        if options:
+            cmd.append(options)
         if push:
             cmd += [self.objdir + '/', remote + '/']
         else:
