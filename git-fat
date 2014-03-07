@@ -158,7 +158,7 @@ class GitFat(object):
         if rshopts:
             cmd.append('--rsh=ssh' + rshopts)
         if options:
-            cmd.append(options)
+            cmd += options.split(' ')
         if push:
             cmd += [self.objdir + '/', remote + '/']
         else:
