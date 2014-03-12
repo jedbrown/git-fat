@@ -389,12 +389,11 @@ class GitFat(object):
 
     def filter_objects(self, refargs, patterns):
         files = self.referenced_objects(**refargs) - self.catalog_objects()
-        files_set = set(files)
+        if refargs.get('all'): # Currently ignores patterns; can we efficiently do both?
+            return files
         orphans_matched = list(self.orphan_files(patterns))
-        print("pulling:")
-        print(map(lambda x: x[1], orphans_matched))
         orphans_objects = set(map(lambda x: x[0], orphans_matched))
-        return files_set & orphans_objects
+        return files & orphans_objects
 
     def cmd_checkout(self, args):
         self.checkout(show_orphans=True)
