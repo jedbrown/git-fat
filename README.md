@@ -38,8 +38,17 @@ Set a remote store for the fat objects by editing `.gitfat`.
 
 This file should typically be committed to the repository so that others
 will automatically have their remote set. This remote address can use
-any protocol supported by rsync. Most users will configure it to use
-remote ssh in a directory with shared access.
+any protocol supported by rsync. 
+
+Most users will configure it to use remote ssh in a directory with shared 
+access. To do this, set the `sshuser` and `sshport` variables in `.gitfat` 
+configuration file. For example, to use rsync with ssh, with the default
+port (22) and authenticate with the user "_fat_", your configuration would 
+look like this: 
+
+    [rsync]
+    remote = your.remote-host.org:/share/fat-store
+    sshuser = fat
 
 # A worked example
 
