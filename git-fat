@@ -390,8 +390,6 @@ class GitFat(object):
     def filter_objects(self, refargs, patterns):
         files = self.referenced_objects(**refargs) - self.catalog_objects()
         orphans_matched = list(self.orphan_files(patterns))
-        print("pulling:")
-        print(map(lambda x: x[1], orphans_matched))
         orphans_objects = set(map(lambda x: x[0], orphans_matched))
         return files & orphans_objects
 
