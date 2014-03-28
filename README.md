@@ -50,6 +50,17 @@ look like this:
     remote = your.remote-host.org:/share/fat-store
     sshuser = fat
 
+## S3 remote
+
+Edit your .gitfat file and add the following:
+
+    [s3]
+    bucket={bucketname}
+    key={access_key_id}
+    secret={secret_access_key}
+
+And then you're done.
+
 # A worked example
 
 Before we start, let's turn on verbose reporting so we can see what's
