@@ -22,9 +22,9 @@ Place `git-fat` in your `PATH`.
 Edit `.gitattributes` to regard any desired extensions as fat files.
 
     $ cat >> .gitattributes
-    *.png filter=fat -crlf
-    *.jpg filter=fat -crlf
-    *.gz  filter=fat -crlf
+    *.png filter=fat -text
+    *.jpg filter=fat -text
+    *.gz  filter=fat -text
     ^D
 
 Run `git fat init` to activate the extension. Now add and commit as usual.
@@ -68,7 +68,7 @@ First, we create a repository and configure it for use with `git-fat`.
     [rsync]
     remote = localhost:/tmp/fat-store
     $ mkdir -p /tmp/fat-store               # make sure the remote directory exists
-    $ echo '*.gz filter=fat -crlf' > .gitattributes
+    $ echo '*.gz filter=fat -text' > .gitattributes
     $ git add .gitfat .gitattributes
     $ git commit -m'Initial repository'
     [master (root-commit) eb7facb] Initial repository
