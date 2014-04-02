@@ -724,9 +724,14 @@ def main():
 
     import argparse
 
-    if sys.argv[1] in [ c + 'version' for c in '','-','--']:
-        print(__version__)
-        sys.exit(0)
+    show_help_and_exit = False
+
+    try:
+        if sys.argv[1] in [ c + 'version' for c in '','-','--']:
+            print(__version__)
+            sys.exit(0)
+    except IndexError:
+        show_help_and_exit = True
 
     fat = GitFat()
 
@@ -794,6 +799,11 @@ def main():
     parser_index_filter.add_argument('-x', dest='add_gitattributes',
         help='prevent adding excluded to .gitattributes', action='store_false')
     parser_index_filter.set_defaults(func=fat.index_filter)
+
+    # defined if there are no argv
+    if show_help_and_exit:
+        parser.print_help()
+        sys.exit(0)
 
     args = parser.parse_args()
 
