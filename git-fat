@@ -287,10 +287,16 @@ class GitFat(object):
             bucket    = gitconfig_get('s3.bucket', file=cfgpath)
             key       = gitconfig_get('s3.key', file=cfgpath)
             if key is None:
-                raise RuntimeError('No s3.key in %s' % cfgpath)
+                try:
+                    key = os.environ['AWS_ACCESS_KEY_ID']
+                except KeyError:
+                    raise RuntimeError('No s3.key in %s' % cfgpath)
             secret    = gitconfig_get('s3.secret', file=cfgpath)
             if secret is None:
-                raise RuntimeError('No s3.secret in %s' % cfgpath)
+                try:
+                    secret = os.environ['AWS_SECRET_ACCESS_KEY']
+                except KeyError:
+                    raise RuntimeError('No s3.secret in %s' % cfgpath)
             return S3Backend(bucket,key,secret,objdir)
         else:
             raise RuntimeError('No supported backends specified in %s' % cfgpath)
