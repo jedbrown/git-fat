@@ -105,8 +105,10 @@ def gitconfig_get(name, file=None):
     args.append(name)
     p = subprocess.Popen(args, stdout=subprocess.PIPE)
     output = p.communicate()[0].strip()
-    if p.returncode != 0:
+    if p.returncode and file is None:
         return None
+    elif p.returncode:
+        return gitconfig_get(name)
     else:
         return output
 def gitconfig_set(name, value, file=None):
