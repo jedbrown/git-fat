@@ -7,6 +7,7 @@ import sys
 import hashlib
 import tempfile
 import os
+import fnmatch
 import subprocess
 import shlex
 import shutil
@@ -508,7 +509,12 @@ class GitFat(object):
             blobhash, sep, tail = tail.partition(' ')
             stageno, sep, tail = tail.partition('\t')
             filename = tail.strip()
-            if filename not in filelist:
+            infilelist = False
+            for pattern in filelist:
+                if fnmatch.fnmatch(filename, pattern):
+                    infilelist = True
+                    break
+            if not infilelist:
                 continue
             if mode == "120000":
                 # skip symbolic links
