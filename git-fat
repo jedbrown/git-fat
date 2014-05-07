@@ -248,19 +248,21 @@ class GitFat(object):
                     bytes += len(block)
                     outstream.write(block)
                 outstream.flush()
-            digest = h.hexdigest()
-            objfile = os.path.join(self.objdir, digest)
-            if not ishanging:
-                if os.path.exists(objfile):
-                    self.verbose('git-fat filter-clean: cache already exists %s (referenced by %s)' % (objfile, str(args[0])))
-                    os.remove(tmpname)
-                else:
-                    # Set permissions for the new file using the current umask
-                    os.chmod(tmpname, int('444', 8) & ~umask())
-                    os.rename(tmpname, objfile)
-                    self.verbose('git-fat filter-clean: caching to %s' % objfile)
-                cached = True
-                outstreamclean.write(self.encode(digest, bytes))
+            # Pass through 0-byte files as git tends to be picky, calling this function for those files and creating rebase problems later
+            if bytes != 0:
+                digest = h.hexdigest()
+                objfile = os.path.join(self.objdir, digest)
+                if not ishanging:
+                    if os.path.exists(objfile):
+                        self.verbose('git-fat filter-clean: cache already exists %s (referenced by %s)' % (objfile, str(args[0])))
+                        os.remove(tmpname)
+                    else:
+                        # Set permissions for the new file using the current umask
+                        os.chmod(tmpname, int('444', 8) & ~umask())
+                        os.rename(tmpname, objfile)
+                        self.verbose('git-fat filter-clean: caching to %s' % objfile)
+                    cached = True
+                    outstreamclean.write(self.encode(digest, bytes))
         finally:
             if not cached:
                 os.remove(tmpname)
@@ -285,8 +287,10 @@ class GitFat(object):
                 self.verbose('git-fat filter-smudge: fat object missing %s (required by %s)' % (objfile, str(args[0])))
                 sys.stdout.write(self.encode(result, bytes))   # could leave a better notice about how to recover this file
         else:                             # We have an iterable over the original input.
-            self.verbose('git-fat filter-smudge: not a managed file (%s)' % str(args[0]))
-            cat_iter(result, sys.stdout)
+            # Complementary action to how 0-byte files are handled in filter_clean
+            if len(next(result)) != 0:
+                self.verbose('git-fat filter-smudge: not a managed file (%s)' % str(args[0]))
+                cat_iter(result, sys.stdout)
     def catalog_objects(self):
         return set(os.listdir(self.objdir))
     def referenced_objects(self, rev=None, all=False):
