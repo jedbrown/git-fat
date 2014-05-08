@@ -420,13 +420,6 @@ class GitFat(object):
     def cmd_checkout(self, args):
         self.checkout(show_orphans=True)
 
-    def cmd_gc(self):
-        garbage = self.catalog_objects() - self.referenced_objects()
-        print('Unreferenced objects to remove: %d' % len(garbage))
-        for obj in garbage:
-            fname = os.path.join(self.objdir, obj)
-            print('%10d %s' % (os.stat(fname).st_size, obj))
-            os.remove(fname)
 
     def cmd_verify(self):
         """Print details of git-fat objects with incorrect data hash"""
@@ -586,8 +579,6 @@ if __name__ == '__main__':
         fat.cmd_push(sys.argv[2:])
     elif cmd == 'pull':
         fat.cmd_pull(sys.argv[2:])
-    elif cmd == 'gc':
-        fat.cmd_gc()
     elif cmd == 'verify':
         fat.cmd_verify()
     elif cmd == 'checkout':
