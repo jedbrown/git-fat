@@ -32,3 +32,9 @@ cd fat-test2
 git fat init
 git fat pull -- 'a.fa*'
 cat a.fat
+echo 'file which is committed and removed afterwards' > d
+git add d
+git commit -m'add d with normal content'
+rm d
+git fat pull
+
