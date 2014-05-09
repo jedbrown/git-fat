@@ -345,6 +345,8 @@ class GitFat(object):
         self.verbose('Executing: %s' % ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input='\x00'.join(files))
+        if p.returncode:
+            sys.exit(p.returncode)
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
         for digest, fname in self.orphan_files():
@@ -379,6 +381,8 @@ class GitFat(object):
         self.verbose('Executing: %s' % ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input='\x00'.join(files))
+        if p.returncode:
+            sys.exit(p.returncode)
         self.checkout()
 
     def parse_pull_patterns(self, args):
