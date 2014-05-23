@@ -122,6 +122,10 @@ class GitFat(object):
     DecodeError = RuntimeError
     def __init__(self):
         self.verbose = verbose_stderr if os.environ.get('GIT_FAT_VERBOSE') else verbose_ignore
+        self.rsync_remote = os.environ.get('GIT_FAT_RSYNC_REMOTE')
+        self.rsync_ssh_port = os.environ.get('GIT_FAT_RSYNC_SSH_PORT')
+        self.rsync_ssh_user = os.environ.get('GIT_FAT_RSYNC_SSH_USER')
+        self.rsync_options = os.environ.get('GIT_FAT_RSYNC_OPTIONS')
         self.gitroot = subprocess.check_output('git rev-parse --show-toplevel'.split()).strip()
         self.gitdir = subprocess.check_output('git rev-parse --git-dir'.split()).strip()
         self.objdir = os.path.join(self.gitdir, 'fat', 'objects')
@@ -137,10 +141,10 @@ class GitFat(object):
         mkdir_p(self.objdir)
     def get_rsync(self):
         cfgpath   = os.path.join(self.gitroot,'.gitfat')
-        remote    = gitconfig_get('rsync.remote', file=cfgpath)
-        ssh_port  = gitconfig_get('rsync.sshport', file=cfgpath)
-        ssh_user  = gitconfig_get('rsync.sshuser', file=cfgpath)
-        options   = gitconfig_get('rsync.options', file=cfgpath)
+        remote    = self.rsync_remote or gitconfig_get('rsync.remote', file=cfgpath)
+        ssh_port  = self.rsync_ssh_port or gitconfig_get('rsync.sshport', file=cfgpath)
+        ssh_user  = self.rsync_ssh_user or gitconfig_get('rsync.sshuser', file=cfgpath)
+        options   = self.rsync_options or gitconfig_get('rsync.options', file=cfgpath)
         if remote is None:
             raise RuntimeError('No rsync.remote in %s' % cfgpath)
         return remote, ssh_port, ssh_user, options

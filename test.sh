@@ -38,3 +38,11 @@ git commit -m'add d with normal content'
 rm d
 git fat pull
 
+# Test env var overrides rsync.remote from .gitfat file
+mv .gitfat .gitfat.bak
+cat - >> .gitfat <<EOF
+[rsync]
+remote = not-a-valid-name:/tmp/fat-store
+EOF
+GIT_FAT_RSYNC_REMOTE='localhost:/tmp/fat-store' git fat pull
+mv .gitfat.bak .gitfat
