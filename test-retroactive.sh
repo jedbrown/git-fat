@@ -1,8 +1,14 @@
 #!/bin/sh -ex
 
+# Use Python's abspath as substitute if realpath isn't available (e.g. on OSX)
+command -v realpath >/dev/null 2>&1 || realpath() {
+  python -c 'import os, sys; print os.path.abspath(sys.argv[1])' $1
+}
+
 git init retro
 cd retro
 cp /usr/share/dict/words words.big
+chmod u+w words.big
 git add words.big
 git commit -m'Add big file without using git-fat'
 sort words.big > sorted.big
