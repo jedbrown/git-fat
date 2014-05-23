@@ -370,6 +370,7 @@ class GitFat(object):
     def cmd_pull(self, args):
         'Pull anything that I have referenced, but not stored'
         self.setup()
+        self.assert_init_done()
         refargs = dict()
         if '--all' in args:
             refargs['all'] = True
@@ -414,9 +415,15 @@ class GitFat(object):
             fname = os.path.join(self.objdir, obj)
             print('%10d %s' % (os.stat(fname).st_size, obj))
             os.remove(fname)
+    def is_init_done(self):
+        return gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge')
+    def assert_init_done(self):
+        if not self.is_init_done():
+            print('Git fat is not yet configured in this repository, run "git fat init"')
+            sys.exit(1)
     def cmd_init(self):
         self.setup()
-        if gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge'):
+        if self.is_init_done():
             print('Git fat already configured, check configuration in .git/config')
         else:
             gitconfig_set('filter.fat.clean', 'git-fat filter-clean')

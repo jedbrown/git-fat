@@ -2,6 +2,9 @@
 # Any copyright is dedicated to the Public Domain.
 # http://creativecommons.org/publicdomain/zero/1.0/
 
+# Clear out repos and fat store from prior test runs
+rm -fR fat-test fat-test2 /tmp/fat-store
+
 git init fat-test
 cd fat-test
 git fat init
@@ -29,6 +32,13 @@ git fat push
 cd ..
 git clone fat-test fat-test2
 cd fat-test2
+# Pull should fail in repo not yet init'ed for git-fat
+git fat pull -- 'a.fa*' && true
+if [ $? -eq 0 ]
+then
+    echo 'ERROR: "git fat pull" in uninitialised repo should fail'
+    exit 1
+fi
 git fat init
 git fat pull -- 'a.fa*'
 cat a.fat
