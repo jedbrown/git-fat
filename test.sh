@@ -38,3 +38,11 @@ git commit -m'add d with normal content'
 rm d
 git fat pull
 
+# Check verify command finds corrupt object
+mv .git/fat/objects/6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8 \
+   .git/fat/objects/6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8.bak
+echo "Not the right data" > .git/fat/objects/6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8
+git fat verify && true
+if [ $? -eq 0 ]; then echo "Verify did not detect invalid object"; exit 1; fi
+mv .git/fat/objects/6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8.bak \
+   .git/fat/objects/6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8

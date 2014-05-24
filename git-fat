@@ -414,6 +414,24 @@ class GitFat(object):
             fname = os.path.join(self.objdir, obj)
             print('%10d %s' % (os.stat(fname).st_size, obj))
             os.remove(fname)
+
+    def cmd_verify(self):
+        """Print details of git-fat objects with incorrect data hash"""
+        corrupted_objects = []
+        for obj in self.catalog_objects():
+            fname = os.path.join(self.objdir, obj)
+            h = hashlib.new('sha1')
+            for block in readblocks(open(fname)):
+                h.update(block)
+            data_hash = h.hexdigest()
+            if obj != data_hash:
+                corrupted_objects.append((obj, data_hash))
+        if corrupted_objects:
+            print('Corrupted objects: %d' % len(corrupted_objects))
+            for obj, data_hash in corrupted_objects:
+                print('%s data hash is %s' % (obj, data_hash))
+            sys.exit(1)
+
     def cmd_init(self):
         self.setup()
         if gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge'):
@@ -539,6 +557,8 @@ if __name__ == '__main__':
         fat.cmd_pull(sys.argv[2:])
     elif cmd == 'gc':
         fat.cmd_gc()
+    elif cmd == 'verify':
+        fat.cmd_verify()
     elif cmd == 'checkout':
         fat.cmd_checkout(sys.argv[2:])
     elif cmd == 'find':
@@ -546,4 +566,4 @@ if __name__ == '__main__':
     elif cmd == 'index-filter':
         fat.cmd_index_filter(sys.argv[2:])
     else:
-        print('Usage: git fat [init|status|push|pull|gc|checkout|find|index-filter]', file=sys.stderr)
+        print('Usage: git fat [init|status|push|pull|gc|verify|checkout|find|index-filter]', file=sys.stderr)
