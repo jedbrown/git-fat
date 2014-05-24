@@ -32,7 +32,13 @@ git fat push
 cd ..
 git clone fat-test fat-test2
 cd fat-test2
-# Pull should fail in repo not yet init'ed for git-fat
+# checkout and pull should fail in repo not yet init'ed for git-fat
+git fat checkout && true
+if [ $? -eq 0 ]
+then
+    echo 'ERROR: "git fat checkout" in uninitialised repo should fail'
+    exit 1
+fi
 git fat pull -- 'a.fa*' && true
 if [ $? -eq 0 ]
 then

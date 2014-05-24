@@ -352,6 +352,7 @@ class GitFat(object):
             sys.exit(p.returncode)
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
+        self.assert_init_done()
         for digest, fname in self.orphan_files():
             objpath = os.path.join(self.objdir, digest)
             if os.access(objpath, os.R_OK):
@@ -370,7 +371,6 @@ class GitFat(object):
     def cmd_pull(self, args):
         'Pull anything that I have referenced, but not stored'
         self.setup()
-        self.assert_init_done()
         refargs = dict()
         if '--all' in args:
             refargs['all'] = True
