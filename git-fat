@@ -288,21 +288,32 @@ class GitFat(object):
         elif rev is None:
             rev = self.revparse('HEAD')
         p1 = subprocess.Popen(['git','rev-list','--objects',rev], stdout=subprocess.PIPE)
-        p2 = subprocess.Popen(['git','cat-file','--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        p2 = subprocess.Popen(['git','cat-file','--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         def cut_sha1hash(input, output):
             for line in input:
                 output.write(line.split()[0] + '\n')
             output.close()
         cut_thread = threading.Thread(target=cut_sha1hash, args=(p1.stdout, p2.stdin))
         cut_thread.start()
-        for line in p2.stdout:
-            objhash, objtype, size = line.split()
-            if objtype == 'blob' and int(size) in self.magiclens:
+        while True:
+            line = p2.stdout.readline()
+            if not line:
+                break  # EOF
+            objhash, objtype, size_str = line.split()
+            size = int(size_str)
+            if objtype == 'blob' and size in self.magiclens:
+                content = p2.stdout.readline()
                 try:
-                    fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
+                    fathash = self.decode(content)[0]
                     referenced.add(fathash)
                 except GitFat.DecodeError:
                     pass
+                consumed = len(content)
+            else:
+                consumed = 0
+            # Consume content
+            while consumed <= size:
+                consumed += len(p2.stdout.read(max(1, size-consumed)))
         cut_thread.join()
         p1.wait()
         p2.wait()
