@@ -419,7 +419,8 @@ class GitFat(object):
         return gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge')
     def assert_init_done(self):
         if not self.is_init_done():
-            print('Git fat is not yet configured in this repository, run "git fat init"')
+            sys.stderr.write('fatal: git-fat is not yet configured in this repository.\n')
+            sys.stderr.write('Run "git fat init" to configure.\n')
             sys.exit(1)
     def cmd_init(self):
         self.setup()
