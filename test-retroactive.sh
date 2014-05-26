@@ -1,9 +1,6 @@
 #!/bin/sh -ex
 
-# Use Python's abspath as substitute if realpath isn't available (e.g. on OSX)
-command -v realpath >/dev/null 2>&1 || realpath() {
-  echo "`pwd`/$1"
-}
+fullpath() { echo "`pwd`/$1"; }
 
 git init retro
 cd retro
@@ -31,7 +28,7 @@ git commit -am'Import big files into git-fat'
 git log --stat
 
 git fat find 10000 | awk '{print $1}' > fat-files
-git filter-branch --index-filter "git fat index-filter $(realpath fat-files) --manage-gitattributes" --tag-name-filter cat -- --all
+git filter-branch --index-filter "git fat index-filter $(fullpath fat-files) --manage-gitattributes" --tag-name-filter cat -- --all
 
 git log --stat
 git checkout HEAD^
@@ -43,14 +40,14 @@ ls -al
 git checkout master
 cat > .gitfat <<EOF
 [rsync]
-remote = $(realpath ../retro-store)
+remote = $(fullpath ../retro-store)
 EOF
 git add .gitfat
 git commit -m'Add .gitfat for local push'
 git fat push
 
 cd ..
-git clone file:///$(realpath retro) retro-clone
+git clone file:///$(fullpath retro) retro-clone
 cd retro-clone
 git fat init
 git fat pull
