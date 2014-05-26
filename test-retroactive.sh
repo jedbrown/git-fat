@@ -2,7 +2,7 @@
 
 # Use Python's abspath as substitute if realpath isn't available (e.g. on OSX)
 command -v realpath >/dev/null 2>&1 || realpath() {
-  python -c 'import os, sys; print os.path.abspath(sys.argv[1])' $1
+  echo "`pwd`/$1"
 }
 
 git init retro
