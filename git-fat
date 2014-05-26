@@ -135,6 +135,13 @@ class GitFat(object):
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
     def setup(self):
         mkdir_p(self.objdir)
+    def is_init_done(self):
+        return gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge')
+    def assert_init_done(self):
+        if not self.is_init_done():
+            sys.stderr.write('fatal: git-fat is not yet configured in this repository.\n')
+            sys.stderr.write('Run "git fat init" to configure.\n')
+            sys.exit(1)
     def get_rsync(self):
         cfgpath   = os.path.join(self.gitroot,'.gitfat')
         remote    = gitconfig_get('rsync.remote', file=cfgpath)
@@ -415,13 +422,6 @@ class GitFat(object):
             fname = os.path.join(self.objdir, obj)
             print('%10d %s' % (os.stat(fname).st_size, obj))
             os.remove(fname)
-    def is_init_done(self):
-        return gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge')
-    def assert_init_done(self):
-        if not self.is_init_done():
-            sys.stderr.write('fatal: git-fat is not yet configured in this repository.\n')
-            sys.stderr.write('Run "git fat init" to configure.\n')
-            sys.exit(1)
 
     def cmd_verify(self):
         """Print details of git-fat objects with incorrect data hash"""
