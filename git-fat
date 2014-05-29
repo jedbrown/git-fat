@@ -288,8 +288,14 @@ class GitFat(object):
             cat_iter(result, sys.stdout)
     def catalog_objects(self):
         return set(os.listdir(self.objdir))
-    def referenced_objects(self, rev=None, all=False):
-        referenced = set()
+    def referenced_objects_with_filenames(self, rev=None, all=False,
+                                          rev_list_args=None, with_filenames=False):
+        """
+        Return mapping of git-fat object hash key to a list of the corresponding
+        file names (or to None if with_filenames is False).
+        """
+        references_with_filenames = collections.defaultdict(list)
+        githash_to_filenames = collections.defaultdict(list)
         if all:
             rev = '--all'
         elif rev is None:
@@ -298,7 +304,11 @@ class GitFat(object):
         p1 = subprocess.Popen(['git','rev-list','--objects',rev], stdout=subprocess.PIPE)
         def cut_sha1hash(input, output):
             for line in input:
-                output.write(line.split()[0] + '\n')
+                splits = line.split()
+                if with_filenames and len(splits) == 2:
+                    # Store filename corresponding to git hash for use later
+                    githash_to_filenames[splits[0]].append(splits[1])
+                output.write(splits[0] + '\n')
             output.close()
         # ...`cat-file --batch-check` filters for git-fat object candidates in bulk...
         p2 = subprocess.Popen(['git','cat-file','--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -330,7 +340,11 @@ class GitFat(object):
                 bytes_read = len(content)
             try:
                 fathash = self.decode(content)[0]
-                referenced.add(fathash)
+                if with_filenames:
+                    references_with_filenames[fathash].extend(
+                        githash_to_filenames.get(objhash))
+                else:
+                    references_with_filenames[fathash] = None
             except GitFat.DecodeError:
                 pass
             # Consume LF record delimiter in `cat-file --batch` output
@@ -342,7 +356,10 @@ class GitFat(object):
         p1.wait()
         p2.wait()
         p3.wait()
-        return referenced
+        return references_with_filenames
+    def referenced_objects(self, rev=None, all=False):
+        return set(self.referenced_objects_with_filenames(
+            rev=rev, all=all, with_filenames=False).keys())
 
     def orphan_files(self, patterns=[]):
         'generator for all orphan placeholders in the working tree'
@@ -357,20 +374,49 @@ class GitFat(object):
         refargs = dict()
         if '--all' in args:
             refargs['all'] = True
-        referenced = self.referenced_objects(**refargs)
+        with_filenames = '--filenames' in args
+        refargs['with_filenames'] = with_filenames
+
+        referenced_with_filenames = self.referenced_objects_with_filenames(**refargs)
+        referenced = set(referenced_with_filenames.keys())
         garbage = catalog - referenced
         orphans = referenced - catalog
+
+        # Add *all* referenced objects to lookup "garbage" filenames outside
+        # HEAD, skipping those we already know about in HEAD
+        if '--filenames' in args and garbage and not 'all' in refargs:
+            referenced_with_filenames.update(
+                self.referenced_objects_with_filenames(
+                    all=True, with_filenames=True,
+                    rev_list_args=['--not', 'HEAD']))
+
+        def print_obj(obj, indent=4):
+            """
+            Print object hash and corresponding filename(s) if available.
+            If a git-fat object corresponds to multiple file names, the
+            object hash is printed multiple times, once per file name.
+            """
+            obj_printed = False
+            if with_filenames:
+                for filename in referenced_with_filenames.get(obj, []):
+                    if filename:
+                        print(' ' * indent + obj + ' ' + filename)
+                        obj_printed = True
+            if not obj_printed:
+                print(' ' * indent + obj)
+
         if '--all' in args:
             for obj in referenced:
-                print(obj)
+                print_obj(obj, indent=0)
         if orphans:
             print('Orphan objects:')
             for orph in orphans:
-                print('    ' + orph)
+                print_obj(orph)
         if garbage:
-            print('Garbage objects:')
+            print('Unreferenced objects%s:'
+                  % (' in HEAD' if not 'all' in refargs else ''))
             for g in garbage:
-                print('    ' + g)
+                print_obj(g)
     def is_dirty(self):
         return subprocess.call(['git', 'diff-index', '--quiet', 'HEAD']) == 0
     def cmd_push(self, args):
