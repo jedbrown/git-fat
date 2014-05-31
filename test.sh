@@ -2,6 +2,9 @@
 # Any copyright is dedicated to the Public Domain.
 # http://creativecommons.org/publicdomain/zero/1.0/
 
+# Clear out repos and fat store from prior test runs
+rm -fR fat-test fat-test2 /tmp/fat-store
+
 git init fat-test
 cd fat-test
 git fat init
@@ -29,6 +32,19 @@ git fat push
 cd ..
 git clone fat-test fat-test2
 cd fat-test2
+# checkout and pull should fail in repo not yet init'ed for git-fat
+git fat checkout && true
+if [ $? -eq 0 ]
+then
+    echo 'ERROR: "git fat checkout" in uninitialised repo should fail'
+    exit 1
+fi
+git fat pull -- 'a.fa*' && true
+if [ $? -eq 0 ]
+then
+    echo 'ERROR: "git fat pull" in uninitialised repo should fail'
+    exit 1
+fi
 git fat init
 git fat pull -- 'a.fa*'
 cat a.fat
@@ -38,3 +54,11 @@ git commit -m'add d with normal content'
 rm d
 git fat pull
 
+# Check verify command finds corrupt object
+mv .git/fat/objects/6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8 \
+   .git/fat/objects/6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8.bak
+echo "Not the right data" > .git/fat/objects/6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8
+git fat verify && true
+if [ $? -eq 0 ]; then echo "Verify did not detect invalid object"; exit 1; fi
+mv .git/fat/objects/6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8.bak \
+   .git/fat/objects/6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8

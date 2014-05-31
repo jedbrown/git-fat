@@ -1,8 +1,11 @@
 #!/bin/sh -ex
 
+fullpath() { echo "`pwd`/$1"; }
+
 git init retro
 cd retro
 cp /usr/share/dict/words words.big
+chmod u+w words.big
 git add words.big
 git commit -m'Add big file without using git-fat'
 sort words.big > sorted.big
@@ -25,7 +28,7 @@ git commit -am'Import big files into git-fat'
 git log --stat
 
 git fat find 10000 | awk '{print $1}' > fat-files
-git filter-branch --index-filter "git fat index-filter $(realpath fat-files) --manage-gitattributes" --tag-name-filter cat -- --all
+git filter-branch --index-filter "git fat index-filter $(fullpath fat-files) --manage-gitattributes" --tag-name-filter cat -- --all
 
 git log --stat
 git checkout HEAD^
@@ -37,14 +40,14 @@ ls -al
 git checkout master
 cat > .gitfat <<EOF
 [rsync]
-remote = $(realpath ../retro-store)
+remote = $(fullpath ../retro-store)
 EOF
 git add .gitfat
 git commit -m'Add .gitfat for local push'
 git fat push
 
 cd ..
-git clone file:///$(realpath retro) retro-clone
+git clone file:///$(fullpath retro) retro-clone
 cd retro-clone
 git fat init
 git fat pull

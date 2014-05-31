@@ -135,6 +135,13 @@ class GitFat(object):
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
     def setup(self):
         mkdir_p(self.objdir)
+    def is_init_done(self):
+        return gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge')
+    def assert_init_done(self):
+        if not self.is_init_done():
+            sys.stderr.write('fatal: git-fat is not yet configured in this repository.\n')
+            sys.stderr.write('Run "git fat init" to configure.\n')
+            sys.exit(1)
     def get_rsync(self):
         cfgpath   = os.path.join(self.gitroot,'.gitfat')
         remote    = gitconfig_get('rsync.remote', file=cfgpath)
@@ -388,6 +395,7 @@ class GitFat(object):
             sys.exit(p.returncode)
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
+        self.assert_init_done()
         for digest, fname in self.orphan_files():
             objpath = os.path.join(self.objdir, digest)
             if os.access(objpath, os.R_OK):
@@ -450,9 +458,27 @@ class GitFat(object):
             fname = os.path.join(self.objdir, obj)
             print('%10d %s' % (os.stat(fname).st_size, obj))
             os.remove(fname)
+
+    def cmd_verify(self):
+        """Print details of git-fat objects with incorrect data hash"""
+        corrupted_objects = []
+        for obj in self.catalog_objects():
+            fname = os.path.join(self.objdir, obj)
+            h = hashlib.new('sha1')
+            for block in readblocks(open(fname)):
+                h.update(block)
+            data_hash = h.hexdigest()
+            if obj != data_hash:
+                corrupted_objects.append((obj, data_hash))
+        if corrupted_objects:
+            print('Corrupted objects: %d' % len(corrupted_objects))
+            for obj, data_hash in corrupted_objects:
+                print('%s data hash is %s' % (obj, data_hash))
+            sys.exit(1)
+
     def cmd_init(self):
         self.setup()
-        if gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge'):
+        if self.is_init_done():
             print('Git fat already configured, check configuration in .git/config')
         else:
             gitconfig_set('filter.fat.clean', 'git-fat filter-clean')
@@ -575,6 +601,8 @@ if __name__ == '__main__':
         fat.cmd_pull(sys.argv[2:])
     elif cmd == 'gc':
         fat.cmd_gc()
+    elif cmd == 'verify':
+        fat.cmd_verify()
     elif cmd == 'checkout':
         fat.cmd_checkout(sys.argv[2:])
     elif cmd == 'find':
@@ -582,4 +610,4 @@ if __name__ == '__main__':
     elif cmd == 'index-filter':
         fat.cmd_index_filter(sys.argv[2:])
     else:
-        print('Usage: git fat [init|status|push|pull|gc|checkout|find|index-filter]', file=sys.stderr)
+        print('Usage: git fat [init|status|push|pull|gc|verify|checkout|find|index-filter]', file=sys.stderr)
