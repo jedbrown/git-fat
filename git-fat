@@ -418,6 +418,7 @@ class GitFat(object):
             refargs['all'] = True
         referenced = self.referenced_objects(**refargs)
         garbage = catalog - referenced
+        # TODO: Why is the orphans computed this way as opposed to calling self.orphan_files?
         orphans = referenced - catalog
         if '--all' in args:
             for obj in referenced:
@@ -565,6 +566,9 @@ class GitFat(object):
         files = self.referenced_objects(**refargs) - self.catalog_objects()
         if refargs.get('all'): # Currently ignores patterns; can we efficiently do both?
             return files
+        # TODO: Based on how orphans are computed in self.cmd_status, isn't the following a no-op?
+        #       In other words, 'files & orphans_objects' is equal to 'files' because files is computed
+        #       above to be 'ref - catalog', and that's exactly how cmd_status computes its orphan. So,?
         orphans_matched = list(self.orphan_files(patterns))
         orphans_objects = set(map(lambda x: x[0], orphans_matched))
         return files & orphans_objects
