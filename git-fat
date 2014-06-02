@@ -207,7 +207,7 @@ class GitFat(object):
             stat = os.lstat(fname)
         except OSError:
             return False, None
-        if stat.st_size != self.magiclen:
+        if stat.st_size not in self.magiclens:
             return False, None
         # read file
         try:
@@ -588,4 +588,4 @@ if __name__ == '__main__':
     elif cmd == 'index-filter':
         fat.cmd_index_filter(sys.argv[2:])
     else:
-        print('Usage: git fat [init|status|push|pull|gc|verify|checkout|find|index-filter]', file=sys.stderr)
+        print('Usage: git fat [init|status|push|pull|verify|checkout|find|index-filter]', file=sys.stderr)
