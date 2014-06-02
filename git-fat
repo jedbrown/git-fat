@@ -303,7 +303,7 @@ class GitFat(object):
             output.close()
         # ...`cat-file --batch` provides full contents of git-fat candidates in bulk
         p3 = subprocess.Popen(['git','cat-file','--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-        # Stream data from p1 -> p2 -> p3 in the background
+        # Stream data: p1 | cut_thread | p2 | filter_thread | p3
         cut_thread = threading.Thread(target=cut_sha1hash, args=(p1.stdout, p2.stdin))
         filter_thread = threading.Thread(target=filter_gitfat_candidates, args=(p2.stdout, p3.stdin))
         cut_thread.start()
