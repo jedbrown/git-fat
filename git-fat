@@ -235,11 +235,16 @@ class GitFat(object):
             # Not sure if this is the right behavior
             return itertools.chain([preamble], readblocks(stream)), None
     def decode_file(self, fname):
-        # Fast check
+        import errno
+        # Fast check - In case sparse-checkout is used, do not choke on missing files
         try:
             stat = os.lstat(fname)
-        except OSError:
-            return False, None
+        except OSError as exc:
+            if exc.errno == errno.ENOENT:
+                pass
+                return False, None
+            else:
+                raise
         if stat.st_size not in self.magiclens:
             return False, None
         # read file
