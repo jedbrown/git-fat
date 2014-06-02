@@ -515,6 +515,14 @@ class GitFat(object):
                 # also does the trick.
                 os.utime(fname, None)
                 # This re-smudge is essentially a copy that restores permissions.
+                # TODO: Find a way to fix the following bug - If fname is modified
+                # by copying a valid another self.magiclen-byte long file, the
+                # following command would replace it (fname) with the fat file
+                # that the committed version of fname refers to rather than that
+                # other self.magiclen-byte long file that got copied over.
+                # The reason for that is obvious: checkout-index --index retrieves
+                # that last committed version of fname, and the smudge naturally
+                # pulls in what that committed fname references rather than ...
                 subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname])
             elif show_orphans:
                 print('Data unavailable: %s %s' % (digest,fname))
