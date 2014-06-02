@@ -306,18 +306,38 @@ class GitFat(object):
                 output.write(line.split()[0] + '\n')
             output.close()
         cut_thread = threading.Thread(target=cut_sha1hash, args=(p1.stdout, p2.stdin))
+
+        # Run 'cat-file' in '--batch' mode to greatly improve performance. Doing the alternative means
+        # starting a new 'cat-file -p' for each line of p2.stdout and that takes about 15 minutes whereas
+        # the '--batch' mode takes only about 1-3 seconds, for a list of about 20,000 entries.
+        # The trade-off for performance here is that an assumption has to be made as follows: the fat object
+        # must be a single-line file (the file that is self.magiclens-byte long).
+        p3 = subprocess.Popen(['git','cat-file','--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        def get_fatobj(input, output):
+            for line in input:
+                objhash, objtype, size = line.split()
+                if objtype == 'blob' and int(size) in self.magiclens:
+                    output.write(objhash + '\n')
+            output.close()
+        fat_thread = threading.Thread(target=get_fatobj, args=(p2.stdout, p3.stdin))
+
         cut_thread.start()
-        for line in p2.stdout:
-            objhash, objtype, size = line.split()
-            if objtype == 'blob' and int(size) in self.magiclens:
-                try:
-                    fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
-                    referenced.add(fathash)
-                except GitFat.DecodeError:
-                    pass
+        fat_thread.start()
+        magiclens = [' blob ' + str(x) for x in self.magiclens]
+        for line in p3.stdout:
+            if line == '' or line.rstrip('\n').endswith(tuple(magiclens)):
+                continue
+            try:
+                fathash = self.decode(line)[0]
+                referenced.add(fathash)
+            except GitFat.DecodeError:
+                pass
         cut_thread.join()
+        fat_thread.join()
+
         p1.wait()
         p2.wait()
+        p3.wait()
         return referenced
 
     def orphan_files(self, patterns=[]):
