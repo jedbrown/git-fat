@@ -294,25 +294,54 @@ class GitFat(object):
             rev = '--all'
         elif rev is None:
             rev = self.revparse('HEAD')
+        # Revision list gives us object names to inspect with cat-file...
         p1 = subprocess.Popen(['git','rev-list','--objects',rev], stdout=subprocess.PIPE)
-        p2 = subprocess.Popen(['git','cat-file','--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         def cut_sha1hash(input, output):
             for line in input:
                 output.write(line.split()[0] + '\n')
             output.close()
+        # ...`cat-file --batch-check` filters for git-fat object candidates in bulk...
+        p2 = subprocess.Popen(['git','cat-file','--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        def filter_gitfat_candidates(input, output):
+            for line in input:
+                objhash, objtype, size = line.split()
+                if objtype == 'blob' and int(size) in self.magiclens:
+                    output.write(objhash + '\n')
+            output.close()
+        # ...`cat-file --batch` provides full contents of git-fat candidates in bulk
+        p3 = subprocess.Popen(['git','cat-file','--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        # Stream data: p1 | cut_thread | p2 | filter_thread | p3
         cut_thread = threading.Thread(target=cut_sha1hash, args=(p1.stdout, p2.stdin))
+        filter_thread = threading.Thread(target=filter_gitfat_candidates, args=(p2.stdout, p3.stdin))
         cut_thread.start()
-        for line in p2.stdout:
-            objhash, objtype, size = line.split()
-            if objtype == 'blob' and int(size) in self.magiclens:
-                try:
-                    fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
-                    referenced.add(fathash)
-                except GitFat.DecodeError:
-                    pass
+        filter_thread.start()
+        # Process metadata + content format provided by `cat-file --batch`
+        while True:
+            metadata_line = p3.stdout.readline()
+            if not metadata_line:
+                break  # EOF
+            objhash, objtype, size_str = metadata_line.split()
+            size, bytes_read = int(size_str), 0
+            # We know from filter that item is a candidate git-fat object and
+            # is small enough to read into memory and process
+            content = ''
+            while bytes_read < size:
+                content += p3.stdout.read(size - bytes_read)
+                bytes_read = len(content)
+            try:
+                fathash = self.decode(content)[0]
+                referenced.add(fathash)
+            except GitFat.DecodeError:
+                pass
+            # Consume LF record delimiter in `cat-file --batch` output
+            while not p3.stdout.read(1):
+                pass
+        # Ensure everything is cleaned up
         cut_thread.join()
+        filter_thread.join()
         p1.wait()
         p2.wait()
+        p3.wait()
         return referenced
 
     def orphan_files(self, patterns=[]):
