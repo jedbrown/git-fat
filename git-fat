@@ -147,6 +147,7 @@ class GitFat(object):
             sys.stderr.write('fatal: git-fat is not yet configured in this repository.\n')
             sys.stderr.write('Run "git fat init" to configure.\n')
             sys.exit(1)
+        self.fat_init_all()     # Upgrade old git-fat setup to the latest one
     def get_fat_config(self):
         return os.path.join(self.gitroot,'.gitfat')
     def get_fat_rsync_dirs(self):
@@ -595,7 +596,7 @@ class GitFat(object):
     def cmd_verify(self):
         """Print details of git-fat objects with incorrect data hash"""
         corrupted_objects = []
-        for obj in self.catalog_objects():
+        for obj in self.catalog_objects(quiet=True):
             fname = os.path.join(self.objdir, obj)
             h = hashlib.new('sha1')
             for block in readblocks(open(fname)):
@@ -609,25 +610,21 @@ class GitFat(object):
                 print('%s data hash is %s' % (obj, data_hash))
             sys.exit(1)
 
+    def fat_init_one(self, var, value):
+        value_cur = gitconfig_get(var)
+        if value_cur is None or value_cur != value:
+            gitconfig_set(var, value)
+            return True
+        return False
+    def fat_init_all(self):
+        ret = False
+        ret = self.fat_init_one('filter.fat.clean', 'git-fat filter-clean %f') or ret
+        ret = self.fat_init_one('filter.fat.smudge', 'git-fat filter-smudge %f') or ret
+        ret = self.fat_init_one('filter.fat.required', 'true') or ret
+        return ret
     def cmd_init(self):
         self.setup()
-        clean    = gitconfig_get('filter.fat.clean')
-        smudge   = gitconfig_get('filter.fat.smudge')
-        required = gitconfig_get('filter.fat.required')
-        cleanVal    = 'git-fat filter-clean %f'
-        smudgeVal   = 'git-fat filter-smudge %f'
-        requiredVal = 'true'
-        init = False
-        if clean is None or clean != cleanVal:
-            gitconfig_set('filter.fat.clean', cleanVal)
-            init = True
-        if smudge is None or smudge != smudgeVal:
-            gitconfig_set('filter.fat.smudge', smudgeVal)
-            init = True
-        if required is None or required != requiredVal:
-            gitconfig_set('filter.fat.required', requiredVal)
-            init = True
-        if init is True:
+        if self.fat_init_all() is True:
             print('Initialized git fat')
     def gen_large_blobs(self, revs, threshsize):
         """Build dict of all blobs"""
@@ -775,6 +772,7 @@ class GitFat(object):
         print('- git fat status    : Prints orphan and garbage objects')
         print('- git fat checkout  : Converts all orphan objects into non-orphan state, while automatically executing \'pull\'-like functionality for the specific orphan file.')
         print('- git fat gc        : Deletes all garbage objects')
+        print('- git fat verify    : Report corrupt fat objects in the catalog')
         print('- More info?        : Define export var GIT_FAT_VERBOSE and continue using git-fat.')
         print('')
         print('Typical git operations, when is git-fat involved and what it does when it is invoked:')
