@@ -7,6 +7,8 @@ import sys
 import hashlib
 import tempfile
 import os
+import fnmatch
+import filecmp
 import subprocess
 import shlex
 import shutil
@@ -120,6 +122,9 @@ def gitconfig_set(name, value, file=None):
 
 class GitFat(object):
     DecodeError = RuntimeError
+    ConfigError = RuntimeError
+    PushError = RuntimeError
+    PullError = RuntimeError
     def __init__(self):
         self.verbose = verbose_stderr if os.environ.get('GIT_FAT_VERBOSE') else verbose_ignore
         self.gitroot = subprocess.check_output('git rev-parse --show-toplevel'.split()).strip()
@@ -142,37 +147,67 @@ class GitFat(object):
             sys.stderr.write('fatal: git-fat is not yet configured in this repository.\n')
             sys.stderr.write('Run "git fat init" to configure.\n')
             sys.exit(1)
-    def get_rsync(self):
-        cfgpath   = os.path.join(self.gitroot,'.gitfat')
-        remote    = gitconfig_get('rsync.remote', file=cfgpath)
-        ssh_port  = gitconfig_get('rsync.sshport', file=cfgpath)
-        ssh_user  = gitconfig_get('rsync.sshuser', file=cfgpath)
-        options   = gitconfig_get('rsync.options', file=cfgpath)
+        self.fat_init_all()     # Upgrade old git-fat setup to the latest one
+    def get_fat_config(self):
+        return os.path.join(self.gitroot,'.gitfat')
+    def get_fat_rsync_dirs(self):
+        cfgpath  = self.get_fat_config()
+        remote   = gitconfig_get('rsync.remote', file=cfgpath)
+        local    = gitconfig_get('rsync.local', file=cfgpath)
         if remote is None:
-            raise RuntimeError('No rsync.remote in %s' % cfgpath)
-        return remote, ssh_port, ssh_user, options
-    def get_rsync_command(self,push):
-        (remote, ssh_port, ssh_user, options) = self.get_rsync()
-        if push:
-            self.verbose('Pushing to %s' % (remote))
-        else:
-            self.verbose('Pulling from %s' % (remote))
-
+            raise GitFat.ConfigError('No rsync.remote in %s' % cfgpath)
+        if local is None:
+            local = self.objdir
+        return remote, local
+    def get_fat_rsync_ssh(self):
+        cfgpath  = self.get_fat_config()
+        ssh_port = gitconfig_get('rsync.sshport', file=cfgpath)
+        ssh_user = gitconfig_get('rsync.sshuser', file=cfgpath)
+        options  = gitconfig_get('rsync.options', file=cfgpath)
+        return ssh_port, ssh_user, options
+    def get_rsync_command(self,src,dst,usessh=True):
         cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-']
-        rshopts = ''
-        if ssh_user:
-            rshopts += ' -l ' + ssh_user
-        if ssh_port:
-            rshopts += ' -p ' + ssh_port
-        if rshopts:
-            cmd.append('--rsh=ssh' + rshopts)
+        (ssh_port, ssh_user, options) = self.get_fat_rsync_ssh()
+        if usessh:
+            rshopts = ''
+            if ssh_user:
+                rshopts += ' -l ' + ssh_user
+            if ssh_port:
+                rshopts += ' -p ' + ssh_port
+            if rshopts:
+                cmd.append('--rsh=ssh' + rshopts)
         if options:
             cmd += options.split(' ')
-        if push:
-            cmd += [self.objdir + '/', remote + '/']
-        else:
-            cmd += [remote + '/', self.objdir + '/']
+        cmd += [src + '/', dst + '/']
         return cmd
+    def pushpull_to_rsync(self,push,cnt):
+        (remote, local) = self.get_fat_rsync_dirs()
+        if push:
+            src = self.objdir
+            dst = remote
+            self.verbose('git-fat pushpull_to_rsync: %d file(s) found to push to %s' % (cnt, remote))
+        else:
+            src = remote
+            dst = local         # If local is set up, smudge filter will take care of linking self.objdir to local during merge|rebase step of 'pull', therefore always pull from remote to local here.
+            self.verbose('git-fat pushpull_to_rsync: %d file(s) found to pull from %s' % (cnt, remote))
+        return self.get_rsync_command(src, dst)
+    def symlink_to_local(self, digest):
+        'Create self.objdir/digest (links) pointing at local/digest if the configuration of local is set up appropriately'
+        (remote, local) = self.get_fat_rsync_dirs()
+        if local == self.objdir or not os.path.exists(local):       # Do nothing if local is not set up or points at a non-existing path.
+            return
+        localfile = os.path.join(local, digest)
+        objfile   = os.path.join(self.objdir, digest)
+        if os.path.lexists(objfile):
+            os.remove(objfile)
+        os.symlink(localfile, objfile)                              # Note that localfile may not exist, i.e. may be creating a broken symlink. It is OK as we may not have pulled from remote (to local) yet.
+    def convert_digest_to_symlink(self, files, local):
+        'Replace self.objdir/digest in files with links pointing at local/digest'
+        for digest in files:
+            fat = os.path.join(self.objdir, digest)
+            localfile = os.path.join(local, digest)
+            os.remove(fat)
+            os.symlink(localfile, fat)
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
     def encode_v1(self, digest, bytes):
@@ -201,12 +236,17 @@ class GitFat(object):
             # Not sure if this is the right behavior
             return itertools.chain([preamble], readblocks(stream)), None
     def decode_file(self, fname):
-        # Fast check
+        import errno
+        # Fast check - In case sparse-checkout is used, do not choke on missing files
         try:
             stat = os.lstat(fname)
-        except OSError:
-            return False, None
-        if stat.st_size != self.magiclen:
+        except OSError as exc:
+            if exc.errno == errno.ENOENT:
+                pass
+                return False, None
+            else:
+                raise
+        if stat.st_size not in self.magiclens:
             return False, None
         # read file
         try:
@@ -226,7 +266,7 @@ class GitFat(object):
         '''
         digest, bytes = self.decode(body, noraise=True)
         return digest
-    def filter_clean(self, instream, outstreamclean):
+    def filter_clean(self, instream, outstreamclean, args):
         h = hashlib.new('sha1')
         bytes = 0
         fd, tmpname = tempfile.mkstemp(dir=self.objdir)
@@ -247,53 +287,71 @@ class GitFat(object):
                     bytes += len(block)
                     outstream.write(block)
                 outstream.flush()
-            digest = h.hexdigest()
-            objfile = os.path.join(self.objdir, digest)
-            if not ishanging:
-                if os.path.exists(objfile):
-                    self.verbose('git-fat filter-clean: cache already exists %s' % objfile)
-                    os.remove(tmpname)
-                else:
-                    # Set permissions for the new file using the current umask
-                    os.chmod(tmpname, int('444', 8) & ~umask())
-                    os.rename(tmpname, objfile)
-                    self.verbose('git-fat filter-clean: caching to %s' % objfile)
-                cached = True
-                outstreamclean.write(self.encode(digest, bytes))
+            # Pass through 0-byte files as git tends to be picky, calling this function for those files and creating rebase problems later
+            if bytes != 0:
+                digest = h.hexdigest()
+                objfile = os.path.join(self.objdir, digest)
+                if not ishanging:
+                    if os.path.exists(objfile):
+                        self.verbose('git-fat filter-clean: cache already exists %s (referenced by %s)' % (objfile, str(args[0])))
+                        os.remove(tmpname)
+                    else:
+                        # Set permissions for the new file using the current umask
+                        os.chmod(tmpname, int('444', 8) & ~umask())
+                        os.rename(tmpname, objfile)
+                        self.verbose('git-fat filter-clean: caching to %s' % objfile)
+                    cached = True
+                    outstreamclean.write(self.encode(digest, bytes))
         finally:
             if not cached:
                 os.remove(tmpname)
 
-    def cmd_filter_clean(self):
+    def cmd_filter_clean(self, args):
         '''
         The clean filter runs when a file is added to the index. It gets the "smudged" (tree)
         version of the file on stdin and produces the "clean" (repository) version on stdout.
         '''
         self.setup()
-        self.filter_clean(sys.stdin, sys.stdout)
+        self.filter_clean(sys.stdin, sys.stdout, args)
 
-    def cmd_filter_smudge(self):
+    def cmd_filter_smudge(self, args):
+        'On-demand retrieval of referenced fat files are supported from the local and then remote so you do not have to fetch all fat files up front'
+        'Note that self.objdir/fatfile is not replaced by a symlink when it is available AND readable. Otherwise, a symlink in its place is created'
         self.setup()
+        filename = str(args[0])
         result, bytes = self.decode_stream(sys.stdin)
         if isinstance(result, str):       # We got a digest
             objfile = os.path.join(self.objdir, result)
+            if not os.access(objfile, os.R_OK):
+                self.verbose('git-fat filter-smudge: fat object missing %s (required by %s) - will query local, if available, and try again' % (objfile, filename))
+                self.symlink_to_local(result)
+            if not os.access(objfile, os.R_OK):
+                self.verbose('git-fat filter-smudge: fat object missing %s (required by %s) - will query remote, if available, and try again' % (objfile, filename))
+                self.pull_from_remote(set([result]))
             try:
                 cat(open(objfile), sys.stdout)
-                self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
+                self.verbose('git-fat filter-smudge: restoring from %s (referenced by %s)' % (objfile, filename))
             except IOError:                 # file not found
-                self.verbose('git-fat filter-smudge: fat object missing %s' % objfile)
+                self.verbose('git-fat filter-smudge: fat object missing %s (required by %s)' % (objfile, filename))
                 sys.stdout.write(self.encode(result, bytes))   # could leave a better notice about how to recover this file
         else:                             # We have an iterable over the original input.
-            self.verbose('git-fat filter-smudge: not a managed file')
-            cat_iter(result, sys.stdout)
-    def catalog_objects(self):
+            # Complementary action to how 0-byte files are handled in filter_clean
+            if len(next(result)) != 0:
+                self.verbose('git-fat filter-smudge: not a managed file (%s)' % filename)
+                cat_iter(result, sys.stdout)
+    def catalog_objects(self, quiet=False):
+        if not quiet:
+            print('  Finding all entries in: %s' % self.objdir)
         return set(os.listdir(self.objdir))
-    def referenced_objects(self, rev=None, all=False):
+    def referenced_objects(self, rev=None, all=False, quiet=False):
         referenced = set()
         if all:
             rev = '--all'
         elif rev is None:
             rev = self.revparse('HEAD')
+        if not quiet:
+            print('  Finding all fat objects referenced by: %s' % rev)
+
         p1 = subprocess.Popen(['git','rev-list','--objects',rev], stdout=subprocess.PIPE)
         p2 = subprocess.Popen(['git','cat-file','--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         def cut_sha1hash(input, output):
@@ -301,26 +359,57 @@ class GitFat(object):
                 output.write(line.split()[0] + '\n')
             output.close()
         cut_thread = threading.Thread(target=cut_sha1hash, args=(p1.stdout, p2.stdin))
+
+        # Run 'cat-file' in '--batch' mode to greatly improve performance. Doing the alternative means
+        # starting a new 'cat-file -p' for each line of p2.stdout and that takes about 15 minutes whereas
+        # the '--batch' mode takes only about 1-3 seconds, for a list of about 20,000 entries.
+        # The trade-off for performance here is that an assumption has to be made as follows: the fat object
+        # must be a single-line file (the file that is self.magiclens-byte long).
+        p3 = subprocess.Popen(['git','cat-file','--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        def get_fatobj(input, output):
+            for line in input:
+                objhash, objtype, size = line.split()
+                if objtype == 'blob' and int(size) in self.magiclens:
+                    output.write(objhash + '\n')
+            output.close()
+        fat_thread = threading.Thread(target=get_fatobj, args=(p2.stdout, p3.stdin))
+
         cut_thread.start()
-        for line in p2.stdout:
-            objhash, objtype, size = line.split()
-            if objtype == 'blob' and int(size) in self.magiclens:
-                try:
-                    fathash = self.decode(subprocess.check_output(['git', 'cat-file', '-p', objhash]))[0]
-                    referenced.add(fathash)
-                except GitFat.DecodeError:
-                    pass
+        fat_thread.start()
+        magiclens = [' blob ' + str(x) for x in self.magiclens]
+        for line in p3.stdout:
+            if line == '' or line.rstrip('\n').endswith(tuple(magiclens)):
+                continue
+            try:
+                fathash = self.decode(line)[0]
+                referenced.add(fathash)
+            except GitFat.DecodeError:
+                pass
         cut_thread.join()
+        fat_thread.join()
+
         p1.wait()
         p2.wait()
+        p3.wait()
         return referenced
 
-    def orphan_files(self, patterns=[]):
+    def orphan_files(self, patterns=[], quiet=False):
         'generator for all orphan placeholders in the working tree'
+        if not quiet:
+            print('  Finding all orphan objects:')
         for fname in subprocess.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
             digest = self.decode_file(fname)[0]
             if digest:
                 yield (digest, fname)
+
+    def fat_files(self, quiet=False):
+        if not quiet:
+            print('  Finding all fat files (not symlinks) in: %s' % self.objdir)
+        fatfiles = set()
+        for fatfile in self.catalog_objects(quiet=True):
+            if fatfile != '' and not os.path.islink(os.path.join(self.objdir, fatfile)):
+                fatfiles.add(fatfile)
+        return fatfiles
 
     def cmd_status(self, args):
         self.setup()
@@ -330,6 +419,7 @@ class GitFat(object):
             refargs['all'] = True
         referenced = self.referenced_objects(**refargs)
         garbage = catalog - referenced
+        # TODO: Why is the orphans computed this way as opposed to calling self.orphan_files?
         orphans = referenced - catalog
         if '--all' in args:
             for obj in referenced:
@@ -344,24 +434,78 @@ class GitFat(object):
                 print('    ' + g)
     def is_dirty(self):
         return subprocess.call(['git', 'diff-index', '--quiet', 'HEAD']) == 0
-    def cmd_push(self, args):
-        'Push anything that I have stored and referenced'
-        self.setup()
-        # Default to push only those objects referenced by current HEAD
-        # (includes history). Finer-grained pushing would be useful.
-        pushall = '--all' in args
-        files = self.referenced_objects(all=pushall) & self.catalog_objects()
-        cmd = self.get_rsync_command(push=True)
-        self.verbose('Executing: %s' % ' '.join(cmd))
+
+    def push_to_remote(self, files):
+        if len(files) == 0:
+            print('Nothing found to push to remote')
+            return
+        cmd = self.pushpull_to_rsync(push=True, cnt=len(files))
+        self.verbose('git-fat push to remote: Executing: %s' % ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input='\x00'.join(files))
         if p.returncode:
             sys.exit(p.returncode)
+        # Diff - This extra check is only supported if remote is accessible as a directory on the machine git-fat is running
+        self.verbose('git-fat push to remote: Checking for identicality of fat files: %s' % ' '.join(cmd))
+        (remote, local) = self.get_fat_rsync_dirs()
+        if os.path.exists(remote):
+            for fatfile in files:
+                if filecmp.cmp(self.objdir + '/' + fatfile, remote + '/' + fatfile) is False:
+                    raise GitFat.PushError('Failed when pushing fat file "%s" to remote "%s"' % (self.objdir + '/' + fatfile, remote))
+    def push_to_local(self, files):
+        (remote, local) = self.get_fat_rsync_dirs()
+        if local == self.objdir or not os.path.exists(local):           # Do nothing if local is not set up or points at a non-existing path.
+            return
+        if len(files) == 0:
+            print('Nothing found to push to local')
+            return
+        self.verbose('git-fat push to local: %d file(s) found to push to %s' % (len(files), local))
+        cmd = self.get_rsync_command(self.objdir, local, usessh=False)  # ssh parameters do not apply to local. They are for remote only.
+        self.verbose('git-fat push to local: Executing: %s' % ' '.join(cmd))
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        p.communicate(input='\x00'.join(files))
+        if p.returncode:
+            sys.exit(p.returncode)
+        # Diff - This extra check is only supported if local is accessible as a directory on the machine git-fat is running
+        #        Because local is already validated above to be accessible as a directory, no need to check for it again.
+        self.verbose('git-fat push to local: Checking for identicality of fat files: %s' % ' '.join(cmd))
+        for fatfile in files:
+            if filecmp.cmp(self.objdir + '/' + fatfile, local + '/' + fatfile) is False:
+                raise GitFat.PushError('Failed when pushing fat file "%s" to local "%s"' % (self.objdir + '/' + fatfile, local))
+        self.convert_digest_to_symlink(files, local)
+    def git_push(self, all=None):
+        cmd = ['git', 'push']
+        if all:
+            cmd.append('--all')
+        print('Running ' + ' '.join(cmd) + ' ...')
+        try:
+            sys.stdout.write( subprocess.check_output(cmd) )
+            sys.stdout.flush()
+        except subprocess.CalledProcessError, e:
+            raise GitFat.PushError('Failed when pushing to remote git repo - Exit code: %d\n%s' % (e.returncode, e.output))
+    def cmd_push(self, args):
+        'Push all (fat)files (as opposed to symlinks to various (fat)files in local/..) that I have stored and referenced'
+        self.setup()
+        # Default to push only those objects referenced by current HEAD
+        # (includes history). Finer-grained pushing is implemented via
+        # 'local', supported whether --all is specified or not.
+        # --all, if specified, is passed to 'git push' as well.
+        pushall = '--all' in args
+        print('Determining fat files to push...')
+        files = self.referenced_objects(all=pushall) & self.fat_files()
+        self.push_to_remote(files)
+        self.push_to_local(files)
+        self.git_push(all=pushall)
+
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
         self.assert_init_done()
         for digest, fname in self.orphan_files():
             objpath = os.path.join(self.objdir, digest)
+            if not os.access(objpath, os.R_OK):
+                self.symlink_to_local(digest)
+            if not os.access(objpath, os.R_OK):
+                self.pull_from_remote(set([digest]))
             if os.access(objpath, os.R_OK):
                 print('Restoring %s -> %s' % (digest, fname))
                 # The output of our smudge filter depends on the existence of
@@ -372,9 +516,35 @@ class GitFat(object):
                 # also does the trick.
                 os.utime(fname, None)
                 # This re-smudge is essentially a copy that restores permissions.
+                # TODO: Find a way to fix the following bug - If fname is modified
+                # by copying a valid another self.magiclen-byte long file, the
+                # following command would replace it (fname) with the fat file
+                # that the committed version of fname refers to rather than that
+                # other self.magiclen-byte long file that got copied over.
+                # The reason for that is obvious: checkout-index --index retrieves
+                # that last committed version of fname, and the smudge naturally
+                # pulls in what that committed fname references rather than ...
                 subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname])
             elif show_orphans:
                 print('Data unavailable: %s %s' % (digest,fname))
+    def pull_from_remote(self, files):
+        'Since this sub is also used by cmd_filter_smudge, stdout needs to be nothing but what git expects => throw away stdout of rsync'
+        if len(files) == 0:
+            return
+        cmd = self.pushpull_to_rsync(push=False, cnt=len(files))
+        self.verbose('git-fat pull: Executing: %s' % ' '.join(cmd))
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        stdoutdata = p.communicate(input='\x00'.join(files))
+        if p.returncode:
+            sys.exit(p.returncode)
+    def git_pull(self):
+        cmd = ['git', 'pull']
+        print('Running ' + ' '.join(cmd) + ' ...')
+        try:
+            sys.stdout.write( subprocess.check_output(cmd) )
+            sys.stdout.flush()
+        except subprocess.CalledProcessError, e:
+            raise GitFat.PullError('Failed when pulling from remote git repo - Exit code: %d\n%s' % (e.returncode, e.output))
     def cmd_pull(self, args):
         'Pull anything that I have referenced, but not stored'
         self.setup()
@@ -387,13 +557,10 @@ class GitFat(object):
             rev = self.revparse(arg)
             if rev:
                 refargs['rev'] = rev
+        self.git_pull()
+        print('Determining fat files to pull...')
         files = self.filter_objects(refargs, self.parse_pull_patterns(args))
-        cmd = self.get_rsync_command(push=False)
-        self.verbose('Executing: %s' % ' '.join(cmd))
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input='\x00'.join(files))
-        if p.returncode:
-            sys.exit(p.returncode)
+        self.pull_from_remote(files)
         self.checkout()
 
     def parse_pull_patterns(self, args):
@@ -408,6 +575,9 @@ class GitFat(object):
         files = self.referenced_objects(**refargs) - self.catalog_objects()
         if refargs.get('all'): # Currently ignores patterns; can we efficiently do both?
             return files
+        # TODO: Based on how orphans are computed in self.cmd_status, isn't the following a no-op?
+        #       In other words, 'files & orphans_objects' is equal to 'files' because files is computed
+        #       above to be 'ref - catalog', and that's exactly how cmd_status computes its orphan. So,?
         orphans_matched = list(self.orphan_files(patterns))
         orphans_objects = set(map(lambda x: x[0], orphans_matched))
         return files & orphans_objects
@@ -426,7 +596,7 @@ class GitFat(object):
     def cmd_verify(self):
         """Print details of git-fat objects with incorrect data hash"""
         corrupted_objects = []
-        for obj in self.catalog_objects():
+        for obj in self.catalog_objects(quiet=True):
             fname = os.path.join(self.objdir, obj)
             h = hashlib.new('sha1')
             for block in readblocks(open(fname)):
@@ -440,13 +610,21 @@ class GitFat(object):
                 print('%s data hash is %s' % (obj, data_hash))
             sys.exit(1)
 
+    def fat_init_one(self, var, value):
+        value_cur = gitconfig_get(var)
+        if value_cur is None or value_cur != value:
+            gitconfig_set(var, value)
+            return True
+        return False
+    def fat_init_all(self):
+        ret = False
+        ret = self.fat_init_one('filter.fat.clean', 'git-fat filter-clean %f') or ret
+        ret = self.fat_init_one('filter.fat.smudge', 'git-fat filter-smudge %f') or ret
+        ret = self.fat_init_one('filter.fat.required', 'true') or ret
+        return ret
     def cmd_init(self):
         self.setup()
-        if self.is_init_done():
-            print('Git fat already configured, check configuration in .git/config')
-        else:
-            gitconfig_set('filter.fat.clean', 'git-fat filter-clean')
-            gitconfig_set('filter.fat.smudge', 'git-fat filter-smudge')
+        if self.fat_init_all() is True:
             print('Initialized git fat')
     def gen_large_blobs(self, revs, threshsize):
         """Build dict of all blobs"""
@@ -508,7 +686,12 @@ class GitFat(object):
             blobhash, sep, tail = tail.partition(' ')
             stageno, sep, tail = tail.partition('\t')
             filename = tail.strip()
-            if filename not in filelist:
+            infilelist = False
+            for pattern in filelist:
+                if fnmatch.fnmatch(filename, pattern):
+                    infilelist = True
+                    break
+            if not infilelist:
                 continue
             if mode == "120000":
                 # skip symbolic links
@@ -521,7 +704,7 @@ class GitFat(object):
                 catfile = subprocess.Popen(['git', 'cat-file', 'blob', blobhash], stdout=subprocess.PIPE)
                 hashobject = subprocess.Popen(['git', 'hash-object', '-w', '--stdin'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
                 def dofilter():
-                    self.filter_clean(catfile.stdout, hashobject.stdin)
+                    self.filter_clean(catfile.stdout, hashobject.stdin, filename)
                     hashobject.stdin.close()
                 filterclean = threading.Thread(target=dofilter)
                 filterclean.start()
@@ -547,14 +730,85 @@ class GitFat(object):
         lsfiles.wait()
         updateindex.wait()
 
+    def cmd_help(self):
+        objdir = os.path.join(self.gitroot, self.objdir)
+        # Directories
+        print('Directories used by git-fat:')
+        print('- objdir : Contains fat files that have not been pushed out yet as well as sym links to pushed out fat files.')
+        print('           Sym links will never exist if \'local\' is not set up.')
+        print('           (' + objdir + ')')
+        try:
+            (remote, local) = self.get_fat_rsync_dirs()
+        except GitFat.ConfigError:
+            (remote, local) = ('', objdir)
+            pass
+        print('- local  : Contains fat files (no sym links), which by definition are the pushed out files.')
+        print('           To increase performance, you are recommended to set this spot to be on a local NAS on your site.')
+        print('           This directory is shared across all your repos/wcps as well as by your peers if they are using it.')
+        print('           Setting up this directory offers disk space saving as well as allows fine grained push operation => faster push performance.')
+        print('           If this configuration option is not set up, its value defaults to \'objdir\'.')
+        print('           (' + local + ')')
+        print('- remote : Contains fat files (no sym links), which by definition are the pushed out files.')
+        print('           This directory is where everyone who use this repo pushes their fat files onto.')
+        print('           (' + remote + ')')
+        print('local and remote are configured via ' + self.get_fat_config())
+        print()
+        # Definitions
+        print('Definitions used by git-fat:')
+        print('- reference objects : List of all fat objects referenced by your working copy. These named files are expected to exist in \'objdir\'.')
+        print('- catalog objects   : List of all entries (files & sym links) in \'objdir\'')
+        print('- orphan objects    : reference - catalog   (subtraction)')
+        print('- garbage objects   : catalog - reference   (subtraction)')
+        print()
+        # Operation
+        print('Two primary functions of git-fat are clean and smudge filters that git invokes as necessary:')
+        print('- filter-clean      : (large) file content (input) => translated (small) reference file (output)')
+        print('-                        Creates the fat object (a file, not a sym link) in \'objdir/...\' using the (large) file content. Its name is based on its SHA1.')
+        print('- filter-smudge     : (small) reference file (stdin) => recovered (large) file content (stdout)')
+        print('                         Creates a sym link:   \'objdir/...\' -> \'local/...\' for the (large) file (name is based on its SHA1). Bypassed if \'objdir/...\' already exists.')
+        print('                         If \'objdir/...\' is broken, it brings in the (large) file from \'remote\' to \'local\' ==> recovers the file.')
+        print('')
+        print('Additional useful functions offered by git-fat are:')
+        print('- git fat status    : Prints orphan and garbage objects')
+        print('- git fat checkout  : Converts all orphan objects into non-orphan state, while automatically executing \'pull\'-like functionality for the specific orphan file.')
+        print('- git fat gc        : Deletes all garbage objects')
+        print('- git fat verify    : Report corrupt fat objects in the catalog')
+        print('- More info?        : Define export var GIT_FAT_VERBOSE and continue using git-fat.')
+        print('')
+        print('Typical git operations, when is git-fat involved and what it does when it is invoked:')
+        print('- git clone ...       : See git checkout.')
+        print('- git fetch           : git-fat is not involved.')
+        print('- git fat pull        : Runs git pull')
+        print('                        Brings in data for orphan objects, computed per HEAD (including history) of your working copy, from \'remote\' to \'local\'.')
+        print('                        Creates a sym link:   \'objdir/...\' -> \'local/...\' for each orphan object that HEAD points at (no history) ==> No longer orphan.')
+        print('                        Lets git invoke git-fat\'s filter-smudge function')
+        print('- git fat pull --all  : Same as git fat pull except that the orphan objects are computed across all git objects,')
+        print('                        not just per what HEAD (including history) of your working copy.')
+        print('- git fat push        : reference & fat files (not sym links), where & is the intersection operation, is pushed out to:')
+        print('                        - \'remote\'. Diff the same file set between \'objdir\' and \'remote\'. Abort if mismatches.')
+        print('                        - \'local\'.  Diff the same file set between \'objdir\' and \'remote\'. Abort if mismatches.')
+        print('                        Replaces each such file in \'objdir\' with a sym link, pointing at \'local/...\'.')
+        print('                        Runs git push')
+        print('- git fat push --all  : Same steps as git fat push except that reference is computed across all git objects,')
+        print('                        not just what your HEAD (including history) is pointing at.')
+        print('')
+        print('- git checkout ...    : git invokes git-fat filter-smudge for each file .gitattributes indicates so.')
+        print('- git add <path/file> : git invokes git-fat filter-clean if .gitattributes has a matching line for <path/file>.')
+        print('- git commit -a [...] : See git add.')
+        print('- git merge ...       : git invokes git-fat filter-clean and filter-smudge for each file .gitattributes indicates so.')
+        print('- git rebase ...      : git invokes git-fat filter-clean and filter-smudge for each file .gitattributes indicates so.')
+        print('- git cherry-pick ... : git invokes git-fat filter-clean and filter-smudge for each file .gitattributes indicates so.')
+        print('- git revert ...      : git invokes git-fat filter-clean and filter-smudge for each file .gitattributes indicates so.')
+
 
 if __name__ == '__main__':
+    'print("Starting git-fat for file: ", str(sys.argv[2]), file=sys.stderr)'
     fat = GitFat()
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'filter-clean':
-        fat.cmd_filter_clean()
+        fat.cmd_filter_clean(sys.argv[2:])
     elif cmd == 'filter-smudge':
-        fat.cmd_filter_smudge()
+        fat.cmd_filter_smudge(sys.argv[2:])
     elif cmd == 'init':
         fat.cmd_init()
     elif cmd == 'status':
@@ -573,5 +827,7 @@ if __name__ == '__main__':
         fat.cmd_find(sys.argv[2:])
     elif cmd == 'index-filter':
         fat.cmd_index_filter(sys.argv[2:])
+    elif cmd == 'help':
+        fat.cmd_help()
     else:
-        print('Usage: git fat [init|status|push|pull|gc|verify|checkout|find|index-filter]', file=sys.stderr)
+        print('Usage: git fat [init|status|push|pull|gc|verify|checkout|find|index-filter|help]', file=sys.stderr)
