@@ -504,8 +504,8 @@ class GitFat(object):
         workdir = os.path.join(self.gitdir, 'fat', 'index-filter')
         mkdir_p(workdir)
 
-        with open(filelist) as f:
-            files_to_exclude = f.read().splitlines()
+        with open(filelist) as excludes:
+            files_to_exclude = excludes.read().splitlines()
 
         ls_files = git('ls-files -s'.split(), stdout=sub.PIPE)
         update_index = git('update-index --index-info'.split(), stdin=sub.PIPE)
@@ -529,11 +529,11 @@ class GitFat(object):
                 objhash = hashobj.stdout.read().strip()
                 catfile.wait()
                 hashobj.wait()
-                with open(cleanedobj_hash, 'w') as f:
-                    f.write(objhash + '\n')
+                with open(cleanedobj_hash, 'w') as cleaned:
+                    cleaned.write(objhash + '\n')
             else:
-                with open(cleanedobj_hash) as f:
-                    objhash = f.read().strip()
+                with open(cleanedobj_hash) as cleaned:
+                    objhash = cleaned.read().strip()
             # Write the placeholder to the index
             update_index.stdin.write(lsfmt.format(mode, objhash, stageno, filename))
 
@@ -542,7 +542,7 @@ class GitFat(object):
             lsout = ls_ga.stdout.read().strip()
             ls_ga.wait()
             if lsout:  # Always try to get the old gitattributes
-                ga_mode, ga_hash, ga_stno, ga_filename = self._parse_ls_files(lsout)
+                ga_mode, ga_hash, ga_stno, _ = self._parse_ls_files(lsout)
                 ga_cat = git('cat-file blob {0}'.format(ga_hash).split(), stdout=sub.PIPE)
                 old_ga = ga_cat.stdout.read().splitlines()
                 ga_cat.wait()
@@ -727,7 +727,7 @@ def main():
     show_help_and_exit = False
 
     try:
-        if sys.argv[1] in [ c + 'version' for c in '','-','--']:
+        if sys.argv[1] in [c + 'version' for c in '', '-', '--']:
             print(__version__)
             sys.exit(0)
     except IndexError:
