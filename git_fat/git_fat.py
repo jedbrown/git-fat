@@ -8,6 +8,7 @@ import os
 import subprocess as sub
 import sys
 import tempfile
+import warnings
 
 try:
     from subprocess import check_output
@@ -24,15 +25,15 @@ except ImportError:
         Python 2.6.2
         '''
         process = sub.Popen(stdout=sub.PIPE, *popenargs, **kwargs)
-        output, unused_err = process.communicate()
+        output, _ = process.communicate()
         retcode = process.poll()
         if retcode:
             cmd = kwargs.get("args")
             if cmd is None:
                 cmd = popenargs[0]
-            error = sub.CalledProcessError(retcode, cmd)
-            error.output = output
-            raise error
+            err = sub.CalledProcessError(retcode, cmd)
+            err.output = output
+            raise err
         return output
 
     sub.check_output = backport_check_output
@@ -95,10 +96,10 @@ def cat(instream, outstream):
     return cat_iter(readblocks(instream), outstream)
 
 
-def gitconfig_get(name, file=None):
+def gitconfig_get(name, cfgfile=None):
     args = ['config', '--get']
-    if file is not None:
-        args += ['--file', file]
+    if cfgfile is not None:
+        args += ['--file', cfgfile]
     args.append(name)
     p = git(args, stdout=sub.PIPE)
     output = p.communicate()[0].strip()
@@ -108,7 +109,7 @@ def gitconfig_get(name, file=None):
         return output
 
 
-def gitconfig_set(name, value, file=None):
+def gitconfig_set(name, value, cfgfile=None):
     args = ['git', 'config']
     if file is not None:
         args += ['--file', file]
@@ -186,13 +187,13 @@ class GitFat(object):
             error('ERROR: git-fat requires that .gitfat is present to use rsync remotes')
             sys.exit(1)
 
-        remote = gitconfig_get('rsync.remote', file=self.cfgpath)
+        remote = gitconfig_get('rsync.remote', cfgfile=self.cfgpath)
         if not remote:
             error('ERROR: No rsync.remote in {0}'.format(self.cfgpath))
             sys.exit(1)
 
-        ssh_port = gitconfig_get('rsync.sshport', file=self.cfgpath)
-        ssh_user = gitconfig_get('rsync.sshuser', file=self.cfgpath)
+        ssh_port = gitconfig_get('rsync.sshport', cfgfile=self.cfgpath)
+        ssh_user = gitconfig_get('rsync.sshuser', cfgfile=self.cfgpath)
         return remote, ssh_port, ssh_user
 
     def _http_opts(self):
@@ -203,7 +204,7 @@ class GitFat(object):
             error('ERROR: git-fat requires that .gitfat is present to use http remotes')
             sys.exit(1)
 
-        remote = gitconfig_get('http.remote', file=self.cfgpath)
+        remote = gitconfig_get('http.remote', cfgfile=self.cfgpath)
         if not remote:
             error('ERROR: No http.remote in {0}'.format(self.cfgpath))
             sys.exit(1)
@@ -263,7 +264,9 @@ class GitFat(object):
         # Put block back
         ret = prepend(block, stream_iter)
         if block.startswith(self._cookie):
-            assert(len(block) == self._magiclen)  # Sanity check
+            if len(block) != self._magiclen:  # Sanity check
+                warnings.warn('Found file with cookie but without magiclen')
+                return ret, False
             return ret, True
         return ret, False
 
@@ -383,7 +386,7 @@ class GitFat(object):
         ret = dict((j, filedict[i]) for i, j in managed.iteritems())
         return ret
 
-    def _orphan_files(self, patterns=[]):
+    def _orphan_files(self, patterns=()):
         '''
         generator for placeholders in working tree that match pattern
         '''
@@ -467,7 +470,7 @@ class GitFat(object):
             # Git needs something, so we cat stdin to stdout
             cat(sys.stdin, sys.stdout)
         else:  # We clean the file
-            if (cur_file):
+            if cur_file:
                 self.verbose("Adding {0}".format(cur_file))
 
             self._filter_clean(sys.stdin, sys.stdout)
@@ -551,7 +554,7 @@ class GitFat(object):
             ga_hashobj = git('hash-object -w --stdin'.split(), stdin=sub.PIPE,
                 stdout=sub.PIPE)
             new_ga = old_ga + ['{0} filter=fat -text'.format(f) for f in newfiles]
-            stdout, stderr = ga_hashobj.communicate('\n'.join(new_ga) + '\n')
+            stdout, _ = ga_hashobj.communicate('\n'.join(new_ga) + '\n')
             update_index.stdin.write(lsfmt.format(ga_mode, stdout.strip(),
                 ga_stno, '.gitattributes'))
 
@@ -608,7 +611,7 @@ class GitFat(object):
         # Flush the buffers to prevent deadlock from wait()
         # Caused when stdout from showfile is a large binary file and can't be fully buffered
         # I haven't figured out a way to avoid this unfortunately
-        for blk in blockiter:
+        for _ in blockiter:
             continue
 
         if showfile.wait() or is_fatfile:
@@ -626,7 +629,7 @@ class GitFat(object):
         cached_objs = self._cached_objects()
         if pattern:
             # filter the working tree by a pattern
-            files = set(digest for digest, fname in self._orphan_files(patterns=[pattern])) - cached_objs
+            files = set(digest for digest, fname in self._orphan_files(patterns=(pattern,))) - cached_objs
         else:
             # default pull any object referenced but not stored
             files = self._referenced_objects(**kwargs) - cached_objs
@@ -697,7 +700,7 @@ class GitFat(object):
             tmpstream = os.fdopen(fd, 'w')
 
             # Hash the input, write to temp file
-            digest, size = self._hash_stream(blockiter, tmpstream)
+            digest, _ = self._hash_stream(blockiter, tmpstream)
             tmpstream.close()
 
             if digest != o:
