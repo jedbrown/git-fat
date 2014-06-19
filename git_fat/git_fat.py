@@ -120,6 +120,27 @@ def gitconfig_set(name, value, cfgfile=None):
     sub.check_call(args)
 
 
+def _config_path(path=None):
+    try:
+        root = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
+    except sub.CalledProcessError:
+        error('git-fat must be run from a git directory')
+        sys.exit(1)
+    default_path = os.path.join(root, '.gitfat')
+    path = path or default_path
+    return path
+
+
+def _obj_dir():
+    try:
+        gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
+    except sub.CalledProcessError:
+        error('git-fat must be run from a git directory')
+        sys.exit(1)
+    objdir = os.path.join(gitdir, 'fat', 'objects')
+    return objdir
+
+
 def http_get(baseurl, filename):
     ''' Returns file descriptor for http file stream, catches urllib2 errors '''
     import urllib2
@@ -151,7 +172,7 @@ def hash_stream(blockiter, outstream):
 
 class BackendInterface(object):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, base_dir, **kwargs):
         """ Configuration options should be set in here """
         raise NotImplementedError(NOT_IMPLEMENTED_MESSAGE)
 
@@ -159,18 +180,21 @@ class BackendInterface(object):
         """ Send these files to the configured remote gitfat store """
         pass
 
-    def pull_files(self, base_dir, file_list):
+    def pull_files(self, file_list):
         """ Fetch the files, returns true on success or false on failure"""
         raise NotImplementedError(NOT_IMPLEMENTED_MESSAGE)
 
 
 class HTTPBackend(BackendInterface):
 
-    def __init__(self, baseurl, *args, **kwargs):
-        self.baseurl = baseurl
-        super(HTTPBackend, self).__init__(*args, **kwargs)
+    def __init__(self, base_dir, **kwargs):
+        remote_url = kwargs.get('remote')
+        if not remote_url:
+            raise RuntimeError("No baseurl configured for rsync")
+        self.remote_url = remote_url
+        self.base_dir = base_dir
 
-    def pull_files(self, base_dir, file_list):
+    def pull_files(self, file_list):
         is_success = True
 
         for o in file_list:
@@ -182,7 +206,7 @@ class HTTPBackend(BackendInterface):
                 is_success = False
                 continue
 
-            fd, tmpname = tempfile.mkstemp(dir=base_dir)
+            fd, tmpname = tempfile.mkstemp(dir=self.base_dir)
             with os.fdopen(fd, 'w') as tmpstream:
                 # Hash the input, write to temp file
                 digest, _ = hash_stream(blockiter, tmpstream)
@@ -194,7 +218,7 @@ class HTTPBackend(BackendInterface):
                 is_success = False
                 continue
 
-            objfile = os.path.join(base_dir, digest)
+            objfile = os.path.join(self.base_dir, digest)
             os.chmod(tmpname, int('444', 8) & ~umask())
             # Rename temp file
             os.rename(tmpname, objfile)
@@ -204,20 +228,29 @@ class HTTPBackend(BackendInterface):
 
 class RSyncBackend(BackendInterface):
 
-    def __init__(self, baseurl, ssh_user, ssh_port='22', *args, **kwargs):
-        self.baseurl = baseurl
+    def __init__(self, base_dir, **kwargs):
+        remote_url = kwargs.get('remote')
+        ssh_user = kwargs.get('sshuser')
+        ssh_port = kwargs.get('sshport', 22)
+        self.remote_url = remote_url
         self.ssh_user = ssh_user
         self.ssh_port = ssh_port
-        super(HTTPBackend, self).__init__(*args, **kwargs)
+        self.base_dir = base_dir
 
     def _rsync(self, push):
         ''' Construct the rsync command '''
-        cmd_tmpl = 'rsync --progress --ignore-existing --from0 --files-from=- -l {} -p {} {}/ {}/'
-        src, dst = self.objdir, self.remote if push else self.remote, self.objdir
-        cmd = cmd_tmpl.format(self.ssh_user, self.ssh_port, src, dst).split(' ')
+        cmd_tmpl = 'rsync --progress --ignore-existing --from0 --files-from=- {}/ {}/'
+        if push:
+            src, dst = self.base_dir, self.remote_url
+        else:
+            src, dst = self.remote_url, self.base_dir
+        extra = '--rsh=ssh -l {} -p {}'.format(self.ssh_user, self.ssh_port)
+        cmd = cmd_tmpl.format(src, dst).split()
+        cmd.append(extra)
+        print(cmd)
         return cmd
 
-    def pull_files(self, base_dir, file_list):
+    def pull_files(self, file_list):
         rsync = self._rsync(push=False)
         p = sub.Popen(rsync, stdin=sub.PIPE)
         p.communicate(input='\x00'.join(file_list))
@@ -240,41 +273,32 @@ BACKEND_MAP = {
 
 class GitFat(object):
 
-    def __init__(self, backend, **kwargs):
+    def __init__(self, backend, full_history=False, **kwargs):
 
         # The backend instance we use to get the files
         self.backend = backend
-
+        self.full_history = full_history
+        self.rev = None  # Unused
+        self.objdir = _obj_dir()
         self._cookie = '#$# git-fat '
         self._format = self._cookie + '{digest} {size:20d}\n'
+
         # Legacy format support below, need to actually check the version once/if we have more than 2
         if os.environ.get('GIT_FAT_VERSION'):
             self._format = self._cookie + '{digest}\n'
 
         # considers the git-fat version when generating the magic length
-        _ml = lambda fn: len(fn(hashlib.sha1('dummy').hexdigest(), 5))
+        # _ml = lambda fn: len(fn(hashlib.sha1('dummy').hexdigest(), 5))
+        # self._magiclen = _ml(self._encode)
+        self._magiclen = 74
 
-        self._magiclen = _ml(self._encode)
+    def verbose(self, *args, **kwargs):
+        error(*args, **kwargs)
 
     def configure(self, verbose=False, full_history=False, **kwargs):
         '''
         Configure git-fat for usage: variables, environment
         '''
-
-        self.full_history = full_history
-        self.rev = None
-
-        try:
-            self.gitroot = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
-            self.gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
-        except sub.CalledProcessError:
-            error('git-fat must be run from a git directory')
-            sys.exit(1)
-
-        self.objdir = os.path.join(self.gitdir, 'fat', 'objects')
-        self.cfgpath = os.path.join(self.gitroot, '.gitfat')
-
-        self.verbose = error if verbose or os.environ.get("GIT_FAT_VERBOSE") else empty
 
         if not self._configured():
             print('Setting filters in .git/config')
@@ -325,30 +349,6 @@ class GitFat(object):
             sys.exit(1)
 
         return remote
-
-    def _rsync(self, push):
-        '''
-        Construct the rsync command
-        '''
-        (remote, ssh_port, ssh_user) = self._rsync_opts()
-        if push:
-            self.verbose('Pushing to %s' % (remote))
-        else:
-            self.verbose('Pulling from %s' % (remote))
-
-        cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-']
-        rshopts = ''
-        if ssh_user:
-            rshopts += ' -l ' + ssh_user
-        if ssh_port:
-            rshopts += ' -p ' + ssh_port
-        if rshopts:
-            cmd.append('--rsh=ssh' + rshopts)
-        if push:
-            cmd += [self.objdir + '/', remote + '/']
-        else:
-            cmd += [remote + '/', self.objdir + '/']
-        return cmd
 
     def _encode(self, digest, size):
         '''
@@ -455,9 +455,6 @@ class GitFat(object):
         revlist.wait()
 
     def _managed_files(self):
-        '''
-        Finds managed files in the specified revision
-        '''
         revlistgen = self._rev_list()
         # Find any objects that are git-fat placeholders which are tracked in the repository
         managed = {}
@@ -482,10 +479,11 @@ class GitFat(object):
         ret = dict((j, filedict[i]) for i, j in managed.iteritems())
         return ret
 
-    def _orphan_files(self, patterns=()):
+    def _orphan_files(self, patterns=None):
         '''
         generator for placeholders in working tree that match pattern
         '''
+        patterns = patterns or []
         # Null-terminated for proper file name handling (spaces)
         for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
             stat = os.lstat(fname)
@@ -718,11 +716,11 @@ class GitFat(object):
         # File exists but is not a fatfile, don't add it
         return False
 
-    def _pull(self, pattern=None, **kwargs):
+    def pull(self, pattern=None, **kwargs):
         """ Get orphans, call backend pull """
         cached_objs = self._cached_objects()
 
-        # TODO: Why use _orphan and _referenced here?
+        # TODO: Why use _orphan _and_ _referenced here?
         if pattern:
             # filter the working tree by a pattern
             files = set(digest for digest, fname in self._orphan_files(patterns=(pattern,))) - cached_objs
@@ -730,43 +728,18 @@ class GitFat(object):
             # default pull any object referenced but not stored
             files = self._referenced_objects(**kwargs) - cached_objs
 
-        if self.backend.pull_files(self.objdir, files):
+        if self.backend.pull_files(files):
             self.checkout()
         else:
             sys.exit(1)
 
-    def pull(self, pattern=None, **kwargs):
-        '''
-        Pull anything that I have referenced, but not stored
-        '''
-        cached_objs = self._cached_objects()
-        if pattern:
-            # filter the working tree by a pattern
-            files = set(digest for digest, fname in self._orphan_files(patterns=(pattern,))) - cached_objs
-        else:
-            # default pull any object referenced but not stored
-            files = self._referenced_objects(**kwargs) - cached_objs
-
-        if files:
-            print("Pulling: ", list(files))
-            rsync = self._rsync(push=False)
-            self.verbose('Executing: {0}'.format(rsync))
-            p = sub.Popen(rsync, stdin=sub.PIPE, preexec_fn=os.setsid)
-            p.communicate(input='\x00'.join(files))
-        else:
-            print("You've got everything! d(^_^)b")
-
-        self.checkout()
-
-    def push(self, **kwargs):
-        '''
-        Push anything that I have stored and referenced (rsync doesn't push if exists on remote)
-        '''
+    def push(self, pattern=None, **kwargs):
+        # We only want the intersection of the referenced files and ones we have cached
+        # Prevents file doesn't exist errors, while saving on bw by default (_referenced only
+        # checks HEAD for files)
         files = self._referenced_objects(**kwargs) & self._cached_objects()
-        rsync = self._rsync(push=True)
-        self.verbose('Executing: {0}'.format(rsync))
-        p = sub.Popen(rsync, stdin=sub.PIPE)
-        p.communicate(input='\x00'.join(files))
+        if not self.backend.push_files(files):
+            sys.exit(1)
 
     def _status(self, **kwargs):
         '''
@@ -847,17 +820,9 @@ def _get_options(config, backend, cfg_file_path):
 
 
 def _read_config(cfg_file_path=None):
-    try:
-        root = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
-    except sub.CalledProcessError:
-        error('git-fat must be run from a git directory')
-        sys.exit(1)
-    default_path = os.path.join(root, '.gitfat')
-
-    cfg_file_path = cfg_file_path or default_path
-
-    config = cfgparser.ConfigFile()
-
+    config = cfgparser.SafeConfigParser()
+    if not os.path.exists(cfg_file_path):
+        raise RuntimeError("Configfile does not exist: {}".format(cfg_file_path))
     try:
         config.read(cfg_file_path)
     except cfgparser.Error:  # TODO: figure out what to catch here
@@ -867,30 +832,36 @@ def _read_config(cfg_file_path=None):
 
 def _parse_config(backend=None, cfg_file_path=None):
     """ Parse the given config file and return the backend instance """
+    cfg_file_path = _config_path(path=cfg_file_path)
     config = _read_config(cfg_file_path)
     if backend is None:
         try:
-            backend = config.sections()[0]
+            backends = config.sections()
         except cfgparser.Error:
             raise RuntimeError("Error reading or parsing configfile: {}".format(cfg_file_path))
+        if not backends:  # e.g. empty file
+            raise RuntimeError("No backends configured in config: {}".format(cfg_file_path))
+        backend = backends[0]
 
     opts = _get_options(config, backend, cfg_file_path)
+    base_dir = _obj_dir()
 
     try:
         Backend = BACKEND_MAP[backend]
     except IndexError:
         raise RuntimeError("Unknown backend specified: {}".format(backend))
+    return Backend(base_dir, **opts)
 
-    return Backend(**opts)
 
-
-run = lambda x: x
-
-def run(backend, name, **kwargs):
-    gitfat = GitFat(backend, **kwargs)
+def run(backend, **kwargs):
+    name = kwargs.pop('func')
+    full_history = kwargs.pop('full_history')
+    kwargs.pop('verbose')  # TODO: FIXME
+    gitfat = GitFat(backend, full_history=full_history, **kwargs)
     fn = name.replace("-", "_")
-    if hasattr(gitfat, fn):
-        getattr(gitfat, fn)(**kwargs)
+    assert hasattr(gitfat, fn), "Unknown function called!"
+    getattr(gitfat, fn)(**kwargs)
+
 
 def main():
 
