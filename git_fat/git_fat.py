@@ -10,6 +10,7 @@ import sys
 import tempfile
 import warnings
 import ConfigParser as cfgparser
+import logging
 
 try:
     from subprocess import check_output
@@ -44,6 +45,8 @@ __version__ = '0.2.4'
 BLOCK_SIZE = 4096
 
 NOT_IMPLEMENTED_MESSAGE = "This method isn't implemented for this backend!"
+
+logging.basicConfig(format='%(levelname)s:%(filename)s:%(message)s')
 
 
 def git(cliargs, *args, **kwargs):
@@ -114,8 +117,8 @@ def gitconfig_get(name, cfgfile=None):
 
 def gitconfig_set(name, value, cfgfile=None):
     args = ['git', 'config']
-    if file is not None:
-        args += ['--file', file]
+    if cfgfile is not None:
+        args += ['--file', cfgfile]
     args += [name, value]
     sub.check_call(args)
 
@@ -124,7 +127,7 @@ def _config_path(path=None):
     try:
         root = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
     except sub.CalledProcessError:
-        error('git-fat must be run from a git directory')
+        logging.error('git-fat must be run from a git directory')
         sys.exit(1)
     default_path = os.path.join(root, '.gitfat')
     path = path or default_path
@@ -135,7 +138,7 @@ def _obj_dir():
     try:
         gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
     except sub.CalledProcessError:
-        error('git-fat must be run from a git directory')
+        logging.error('git-fat must be run from a git directory')
         sys.exit(1)
     objdir = os.path.join(gitdir, 'fat', 'objects')
     return objdir
@@ -150,7 +153,7 @@ def http_get(baseurl, filename):
         res = urllib2.urlopen(geturl)
         return res.fp
     except urllib2.URLError as e:
-        error("WARN: " + e.reason + ': {0}'.format(geturl))
+        logging.warning(e.reason + ': {0}'.format(geturl))
         return None
 
 
@@ -171,26 +174,34 @@ def hash_stream(blockiter, outstream):
 
 
 class BackendInterface(object):
+    """ __init__ and pull_files are required, push_files is optional """
 
     def __init__(self, base_dir, **kwargs):
         """ Configuration options should be set in here """
         raise NotImplementedError(NOT_IMPLEMENTED_MESSAGE)
 
     def push_files(self, file_list):
-        """ Send these files to the configured remote gitfat store """
+        """ Return True if push was successful, False otherwise """
         pass
 
     def pull_files(self, file_list):
-        """ Fetch the files, returns true on success or false on failure"""
+        """ Return True if pull was successful, False otherwise """
         raise NotImplementedError(NOT_IMPLEMENTED_MESSAGE)
 
 
 class HTTPBackend(BackendInterface):
+    """ Pull files from an HTTP server """
 
     def __init__(self, base_dir, **kwargs):
         remote_url = kwargs.get('remote')
         if not remote_url:
-            raise RuntimeError("No baseurl configured for rsync")
+            logging.error('No remote url configured for http backend')
+            sys.exit(1)
+
+        if not remote_url.startswith('http') or remote_url.startswith('https'):
+            logging.error('http remote url must start with http:// or https://')
+            sys.exit(1)
+
         self.remote_url = remote_url
         self.base_dir = base_dir
 
@@ -198,7 +209,7 @@ class HTTPBackend(BackendInterface):
         is_success = True
 
         for o in file_list:
-            stream = http_get(self.baseurl, o)
+            stream = http_get(self.remote_url, o)
             blockiter = readblocks(stream)
 
             # HTTP Error
@@ -213,7 +224,7 @@ class HTTPBackend(BackendInterface):
 
             if digest != o:
                 # Should I retry?
-                error('ERROR: Downloaded digest ({0}) did not match stored digest for orphan: {1}'.format(digest, o))
+                logging.error('Downloaded digest ({0}) did not match stored digest for orphan: {1}'.format(digest, o))
                 os.remove(tmpname)
                 is_success = False
                 continue
@@ -227,11 +238,21 @@ class HTTPBackend(BackendInterface):
 
 
 class RSyncBackend(BackendInterface):
+    """ Push and pull files from rsync remote """
 
     def __init__(self, base_dir, **kwargs):
         remote_url = kwargs.get('remote')
         ssh_user = kwargs.get('sshuser')
-        ssh_port = kwargs.get('sshport', 22)
+        ssh_port = kwargs.get('sshport', '22')
+
+        if not remote_url:
+            logging.error("No remote url configured for rsync")
+            sys.exit(1)
+
+        if not ssh_user:
+            logging.error("sshuser required for rsync remote")
+            sys.exit(1)
+
         self.remote_url = remote_url
         self.ssh_user = ssh_user
         self.ssh_port = ssh_port
@@ -244,10 +265,12 @@ class RSyncBackend(BackendInterface):
             src, dst = self.base_dir, self.remote_url
         else:
             src, dst = self.remote_url, self.base_dir
-        extra = '--rsh=ssh -l {} -p {}'.format(self.ssh_user, self.ssh_port)
         cmd = cmd_tmpl.format(src, dst).split()
+
+        # extra must be passed in as single argv, which is why it's
+        # not in the template and split isn't called on it
+        extra = '--rsh=ssh -l {} -p {}'.format(self.ssh_user, self.ssh_port)
         cmd.append(extra)
-        print(cmd)
         return cmd
 
     def pull_files(self, file_list):
@@ -273,7 +296,7 @@ BACKEND_MAP = {
 
 class GitFat(object):
 
-    def __init__(self, backend, full_history=False, **kwargs):
+    def __init__(self, backend, full_history=False):
 
         # The backend instance we use to get the files
         self.backend = backend
@@ -288,18 +311,15 @@ class GitFat(object):
             self._format = self._cookie + '{digest}\n'
 
         # considers the git-fat version when generating the magic length
-        # _ml = lambda fn: len(fn(hashlib.sha1('dummy').hexdigest(), 5))
-        # self._magiclen = _ml(self._encode)
-        self._magiclen = 74
+        _ml = lambda fn: len(fn(hashlib.sha1('dummy').hexdigest(), 5))
+        self._magiclen = _ml(self._encode)
 
-    def verbose(self, *args, **kwargs):
-        error(*args, **kwargs)
+        self.configure()
 
-    def configure(self, verbose=False, full_history=False, **kwargs):
+    def configure(self):
         '''
         Configure git-fat for usage: variables, environment
         '''
-
         if not self._configured():
             print('Setting filters in .git/config')
             gitconfig_set('filter.fat.clean', 'git-fat filter-clean %f')
@@ -315,40 +335,6 @@ class GitFat(object):
         reqs = os.path.isdir(self.objdir)
         filters = gitconfig_get('filter.fat.clean') and gitconfig_get('filter.fat.smudge')
         return filters and reqs
-
-    def _rsync_opts(self):
-        """ Read rsync options from config """
-        if not os.path.isfile(self.cfgpath):
-            error('ERROR: git-fat requires that .gitfat is present to use rsync remotes')
-            sys.exit(1)
-
-        remote = gitconfig_get('rsync.remote', cfgfile=self.cfgpath)
-        if not remote:
-            error('ERROR: No rsync.remote in {0}'.format(self.cfgpath))
-            sys.exit(1)
-
-        ssh_port = gitconfig_get('rsync.sshport', cfgfile=self.cfgpath)
-        ssh_user = gitconfig_get('rsync.sshuser', cfgfile=self.cfgpath)
-        return remote, ssh_port, ssh_user
-
-    def _http_opts(self):
-        '''
-        Read http options from config
-        '''
-        if not os.path.isfile(self.cfgpath):
-            error('ERROR: git-fat requires that .gitfat is present to use http remotes')
-            sys.exit(1)
-
-        remote = gitconfig_get('http.remote', cfgfile=self.cfgpath)
-        if not remote:
-            error('ERROR: No http.remote in {0}'.format(self.cfgpath))
-            sys.exit(1)
-
-        if not remote.startswith('http') or remote.startswith('https'):
-            error('ERROR: http remote url must start with http:// or https://')
-            sys.exit(1)
-
-        return remote
 
     def _encode(self, digest, size):
         '''
@@ -507,12 +493,12 @@ class GitFat(object):
             try:
                 with open(objfile) as f:
                     cat(f, outstream)
-                self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
+                logging.info('git-fat filter-smudge: restoring from {}'.format(objfile))
             except IOError:
-                self.verbose('git-fat filter-smudge: fat object not found in cache %s' % objfile)
+                logging.info('git-fat filter-smudge: fat object not found in cache {}'.format(objfile))
                 outstream.write(block)
         else:
-            self.verbose('git-fat filter-smudge: not a managed file')
+            logging.info('git-fat filter-smudge: not a managed file')
             cat_iter(blockiter, sys.stdout)
 
     def _filter_clean(self, instream, outstream):
@@ -539,7 +525,7 @@ class GitFat(object):
         objfile = os.path.join(self.objdir, digest)
 
         if os.path.exists(objfile):
-            self.verbose('git-fat filter-clean: cached file already exists %s' % objfile)
+            logging.info('git-fat filter-clean: cached file already exists {}'.format(objfile))
             # Remove temp file
             os.remove(tmpname)
         else:
@@ -547,7 +533,7 @@ class GitFat(object):
             os.chmod(tmpname, int('444', 8) & ~umask())
             # Rename temp file
             os.rename(tmpname, objfile)
-            self.verbose('git-fat filter-clean: caching to %s' % objfile)
+            logging.info('git-fat filter-clean: caching to {}'.format(objfile))
 
         # Write placeholder to index
         outstream.write(self._encode(digest, size))
@@ -557,7 +543,7 @@ class GitFat(object):
         Public command to do the clean (should only be called by git)
         '''
         if cur_file and not self.can_clean_file(cur_file):
-            self.verbose(
+            logging.info(
                 "Not adding: {0}\n".format(cur_file) +
                 "It is not a new file and is not managed by git-fat"
             )
@@ -565,7 +551,7 @@ class GitFat(object):
             cat(sys.stdin, sys.stdout)
         else:  # We clean the file
             if cur_file:
-                self.verbose("Adding {0}".format(cur_file))
+                logging.info("Adding {0}".format(cur_file))
 
             self._filter_clean(sys.stdin, sys.stdout)
 
@@ -765,49 +751,6 @@ class GitFat(object):
             for g in stale:
                 print('\t' + g)
 
-    def http_pull(self, **kwargs):
-        '''
-        Alternative to rsync (for anon clones)
-        '''
-        ret_code = 0
-
-        _, orphans = self._status(**kwargs)
-        baseurl = self._http_opts()
-        for o in orphans:
-            stream = http_get(baseurl, o)
-            blockiter = readblocks(stream)
-
-            # HTTP Error
-            if blockiter is None:
-                ret_code = 1
-                continue
-
-            fd, tmpname = tempfile.mkstemp(dir=self.objdir)
-            tmpstream = os.fdopen(fd, 'w')
-
-            # Hash the input, write to temp file
-            digest, _ = hash_stream(blockiter, tmpstream)
-            tmpstream.close()
-
-            if digest != o:
-                # Should I retry?
-                error('ERROR: Downloaded digest ({0}) did not match stored digest for orphan: {1}'.format(digest, o))
-                os.remove(tmpname)
-                ret_code = 1
-                continue
-
-            objfile = os.path.join(self.objdir, digest)
-            os.chmod(tmpname, int('444', 8) & ~umask())
-            # Rename temp file
-            os.rename(tmpname, objfile)
-
-        self.checkout()
-        sys.exit(ret_code)
-
-    def http_push(self):
-        ''' NOT IMPLEMENTED '''
-        pass
-
 
 def _get_options(config, backend, cfg_file_path):
     """ returns the options for a backend in dictionary form """
@@ -856,8 +799,7 @@ def _parse_config(backend=None, cfg_file_path=None):
 def run(backend, **kwargs):
     name = kwargs.pop('func')
     full_history = kwargs.pop('full_history')
-    kwargs.pop('verbose')  # TODO: FIXME
-    gitfat = GitFat(backend, full_history=full_history, **kwargs)
+    gitfat = GitFat(backend, full_history=full_history)
     fn = name.replace("-", "_")
     assert hasattr(gitfat, fn), "Unknown function called!"
     getattr(gitfat, fn)(**kwargs)
@@ -874,61 +816,45 @@ def main():
     # Global options
     parser.add_argument('-a', "--full-history", dest='full_history', action='store_true',
         help='Look for git-fat placeholder files in the entire history instead of just the working copy')
-    parser.add_argument('-v', "--verbose", dest='verbose', action='store_true',
-        help='Verbose output')
 
     # Empty function for legacy api; config gets called every time
     # (assuming if user is calling git-fat they want it configured)
-    sp = subparser.add_parser('init',
-        help='Initialize git-fat')
+    sp = subparser.add_parser('init', help='Initialize git-fat')
     sp.set_defaults(func=empty)
 
-    sp = subparser.add_parser('filter-clean',
-        help='filter-clean to be called only by git')
+    sp = subparser.add_parser('filter-clean', help='filter-clean to be called only by git')
     sp.add_argument("cur_file", nargs="?")
     sp.set_defaults(func='filter_clean')
 
-    sp = subparser.add_parser('filter-smudge',
-        help='filter-smudge to be called only by git')
-    sp.add_argument("cur_file", nargs="?")  # Currently unused
+    sp = subparser.add_parser('filter-smudge', help='filter-smudge to be called only by git')
+    sp.add_argument("cur_file", nargs="?")
     sp.set_defaults(func='filter_smudge')
 
-    sp = subparser.add_parser('push',
-        help='push cache to remote git-fat server')
+    sp = subparser.add_parser('push', help='push cache to remote git-fat server')
     sp.set_defaults(func='push')
 
-    sp = subparser.add_parser('pull',
-        help='pull fatfiles from remote git-fat server')
-    sp.add_argument("pattern", nargs="?",
-        help='pull only files matching pattern')
+    sp = subparser.add_parser('pull', help='pull fatfiles from remote git-fat server')
+    sp.add_argument("pattern", nargs="?", help='pull only files matching pattern')
     sp.set_defaults(func='pull')
 
-    sp = subparser.add_parser('checkout',
-        help='resmudge all orphan objects')
+    sp = subparser.add_parser('checkout', help='resmudge all orphan objects')
     sp.set_defaults(func='checkout')
 
-    sp = subparser.add_parser('find',
-        help='find all objects over [size]')
-    sp.add_argument("size", type=int,
-        help='threshold size in bytes')
+    sp = subparser.add_parser('find', help='find all objects over [size]')
+    sp.add_argument("size", type=int, help='threshold size in bytes')
     sp.set_defaults(func='find')
 
-    sp = subparser.add_parser('status',
-        help='print orphan and stale objects')
+    sp = subparser.add_parser('status', help='print orphan and stale objects')
     sp.set_defaults(func='status')
 
-    sp = subparser.add_parser('list',
-        help='list all files managed by git-fat')
+    sp = subparser.add_parser('list', help='list all files managed by git-fat')
     sp.set_defaults(func='list_files')
 
-    sp = subparser.add_parser('pull-http',
-        help='anonymously download git-fat files over http')
+    sp = subparser.add_parser('pull-http', help='anonymously download git-fat files over http')
     sp.set_defaults(func='http_pull')
 
-    sp = subparser.add_parser('index-filter',
-        help='git fat index-filter for filter-branch')
-    sp.add_argument('filelist',
-        help='file containing all files to import to git-fat')
+    sp = subparser.add_parser('index-filter', help='git fat index-filter for filter-branch')
+    sp.add_argument('filelist', help='file containing all files to import to git-fat')
     sp.add_argument('-x', dest='add_gitattributes',
         help='prevent adding excluded to .gitattributes', action='store_false')
     sp.set_defaults(func='index_filter')
@@ -939,7 +865,7 @@ def main():
             sys.exit(0)
     except IndexError:
         parser.print_help()
-        sys.exit(0)
+        sys.exit(1)
 
     backend = _parse_config()
 
@@ -949,7 +875,7 @@ def main():
         run(backend, **kwargs)
     except:
         if kwargs.get('cur_file'):
-            error("ERROR: processing file: " + kwargs.get('cur_file'))
+            logging.error("processing file: " + kwargs.get('cur_file'))
         raise
 
 
