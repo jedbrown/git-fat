@@ -9,6 +9,7 @@ import subprocess as sub
 import sys
 import tempfile
 import warnings
+import ConfigParser as cfgparser
 
 try:
     from subprocess import check_output
@@ -41,6 +42,8 @@ except ImportError:
 __version__ = '0.2.4'
 
 BLOCK_SIZE = 4096
+
+NOT_IMPLEMENTED_MESSAGE = "This method isn't implemented for this backend!"
 
 
 def git(cliargs, *args, **kwargs):
@@ -130,27 +133,137 @@ def http_get(baseurl, filename):
         return None
 
 
+def hash_stream(blockiter, outstream):
+    '''
+    Writes blockiter to outstream and returns the digest and bytes written
+    '''
+    hasher = hashlib.new('sha1')
+    bytes_written = 0
+
+    for block in blockiter:
+        # Add the block to be hashed
+        hasher.update(block)
+        bytes_written += len(block)
+        outstream.write(block)
+    outstream.flush()
+    return hasher.hexdigest(), bytes_written
+
+
+class BackendInterface(object):
+
+    def __init__(self, *args, **kwargs):
+        """ Configuration options should be set in here """
+        raise NotImplementedError(NOT_IMPLEMENTED_MESSAGE)
+
+    def push_files(self, file_list):
+        """ Send these files to the configured remote gitfat store """
+        pass
+
+    def pull_files(self, base_dir, file_list):
+        """ Fetch the files, returns true on success or false on failure"""
+        raise NotImplementedError(NOT_IMPLEMENTED_MESSAGE)
+
+
+class HTTPBackend(BackendInterface):
+
+    def __init__(self, baseurl, *args, **kwargs):
+        self.baseurl = baseurl
+        super(HTTPBackend, self).__init__(*args, **kwargs)
+
+    def pull_files(self, base_dir, file_list):
+        is_success = True
+
+        for o in file_list:
+            stream = http_get(self.baseurl, o)
+            blockiter = readblocks(stream)
+
+            # HTTP Error
+            if blockiter is None:
+                is_success = False
+                continue
+
+            fd, tmpname = tempfile.mkstemp(dir=base_dir)
+            with os.fdopen(fd, 'w') as tmpstream:
+                # Hash the input, write to temp file
+                digest, _ = hash_stream(blockiter, tmpstream)
+
+            if digest != o:
+                # Should I retry?
+                error('ERROR: Downloaded digest ({0}) did not match stored digest for orphan: {1}'.format(digest, o))
+                os.remove(tmpname)
+                is_success = False
+                continue
+
+            objfile = os.path.join(base_dir, digest)
+            os.chmod(tmpname, int('444', 8) & ~umask())
+            # Rename temp file
+            os.rename(tmpname, objfile)
+
+        return is_success
+
+
+class RSyncBackend(BackendInterface):
+
+    def __init__(self, baseurl, ssh_user, ssh_port='22', *args, **kwargs):
+        self.baseurl = baseurl
+        self.ssh_user = ssh_user
+        self.ssh_port = ssh_port
+        super(HTTPBackend, self).__init__(*args, **kwargs)
+
+    def _rsync(self, push):
+        ''' Construct the rsync command '''
+        cmd_tmpl = 'rsync --progress --ignore-existing --from0 --files-from=- -l {} -p {} {}/ {}/'
+        src, dst = self.objdir, self.remote if push else self.remote, self.objdir
+        cmd = cmd_tmpl.format(self.ssh_user, self.ssh_port, src, dst).split(' ')
+        return cmd
+
+    def pull_files(self, base_dir, file_list):
+        rsync = self._rsync(push=False)
+        p = sub.Popen(rsync, stdin=sub.PIPE)
+        p.communicate(input='\x00'.join(file_list))
+        # TODO: fix for success check
+        return True
+
+    def push_files(self, file_list):
+        rsync = self._rsync(push=True)
+        p = sub.Popen(rsync, stdin=sub.PIPE)
+        p.communicate(input='\x00'.join(file_list))
+        # TODO: fix for success check
+        return True
+
+
+BACKEND_MAP = {
+    'rsync': RSyncBackend,
+    'http': HTTPBackend,
+}
+
+
 class GitFat(object):
 
-    def __init__(self):
+    def __init__(self, backend, **kwargs):
 
-        def magiclen(enc_func):
-            return len(enc_func(hashlib.sha1('dummy').hexdigest(), 5))
+        # The backend instance we use to get the files
+        self.backend = backend
 
         self._cookie = '#$# git-fat '
         self._format = self._cookie + '{digest} {size:20d}\n'
-        # Legacy format support below
+        # Legacy format support below, need to actually check the version once/if we have more than 2
         if os.environ.get('GIT_FAT_VERSION'):
             self._format = self._cookie + '{digest}\n'
 
-        self._magiclen = magiclen(self._encode)
+        # considers the git-fat version when generating the magic length
+        _ml = lambda fn: len(fn(hashlib.sha1('dummy').hexdigest(), 5))
 
-    def configure(self, verbose=False, **kwargs):
+        self._magiclen = _ml(self._encode)
+
+    def configure(self, verbose=False, full_history=False, **kwargs):
         '''
         Configure git-fat for usage: variables, environment
         '''
 
-        # Setup Variables
+        self.full_history = full_history
+        self.rev = None
+
         try:
             self.gitroot = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
             self.gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
@@ -180,9 +293,7 @@ class GitFat(object):
         return filters and reqs
 
     def _rsync_opts(self):
-        '''
-        Read rsync options from config
-        '''
+        """ Read rsync options from config """
         if not os.path.isfile(self.cfgpath):
             error('ERROR: git-fat requires that .gitfat is present to use rsync remotes')
             sys.exit(1)
@@ -270,21 +381,6 @@ class GitFat(object):
             return ret, True
         return ret, False
 
-    def _hash_stream(self, blockiter, outstream):
-        '''
-        Writes blockiter to outstream and returns the digest and bytes written
-        '''
-        hasher = hashlib.new('sha1')
-        bytes_written = 0
-
-        for block in blockiter:
-            # Add the block to be hashed
-            hasher.update(block)
-            bytes_written += len(block)
-            outstream.write(block)
-        outstream.flush()
-        return hasher.hexdigest(), bytes_written
-
     def _get_digest(self, stream):
         '''
         Returns digest if stream is fatfile placeholder or '' if not
@@ -312,14 +408,14 @@ class GitFat(object):
         objs_dict = self._managed_files(**kwargs)
         return set(objs_dict.keys())
 
-    def _rev_list(self, rev=None, full_history=False):
+    def _rev_list(self):
         '''
         Generator for objects in rev. Returns (hash, type, size) tuple.
         '''
 
-        rev = rev or 'HEAD'
+        rev = self.rev or 'HEAD'
         # full_history implies --all
-        args = ['--all'] if full_history else ['--no-walk', rev]
+        args = ['--all'] if self.full_history else ['--no-walk', rev]
 
         # Get all the git objects in the current revision and in history if --all is specified
         revlist = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
@@ -336,13 +432,13 @@ class GitFat(object):
 
         catfile.wait()
 
-    def _find_paths(self, hashes, rev=None, full_history=False):
+    def _find_paths(self, hashes):
         '''
         Takes a list of git object hashes and generates hash,path tuples
         '''
-        rev = rev or 'HEAD'
+        rev = self.rev or 'HEAD'
         # full_history implies --all
-        args = ['--all'] if full_history else ['--no-walk', rev]
+        args = ['--all'] if self.full_history else ['--no-walk', rev]
 
         revlist = git('rev-list --objects'.split() + args, stdout=sub.PIPE)
         for line in revlist.stdout:
@@ -358,11 +454,11 @@ class GitFat(object):
 
         revlist.wait()
 
-    def _managed_files(self, rev=None, full_history=False):
+    def _managed_files(self):
         '''
         Finds managed files in the specified revision
         '''
-        revlistgen = self._rev_list(rev=rev, full_history=full_history)
+        revlistgen = self._rev_list()
         # Find any objects that are git-fat placeholders which are tracked in the repository
         managed = {}
         for objhash, objtype, size in revlistgen:
@@ -379,7 +475,7 @@ class GitFat(object):
         # filenames above, but was running into the memory buffer issue
         # Instead we just make another call to rev-list.  Takes more time, but still
         # only takes 5 seconds to traverse the entire history of a 22k commit repo
-        filedict = dict(self._find_paths(managed.keys(), rev=rev, full_history=full_history))
+        filedict = dict(self._find_paths(managed.keys()))
 
         # return a dict(git-fat hash -> filename)
         # git's objhash are the keys in `managed` and `filedict`
@@ -439,7 +535,7 @@ class GitFat(object):
         tmpstream = os.fdopen(fd, 'w')
 
         # Hash the input, write to temp file
-        digest, size = self._hash_stream(blockiter, tmpstream)
+        digest, size = hash_stream(blockiter, tmpstream)
         tmpstream.close()
 
         objfile = os.path.join(self.objdir, digest)
@@ -485,14 +581,14 @@ class GitFat(object):
         '''
         Find any files over size threshold in the repository.
         '''
-        revlistgen = self._rev_list(full_history=True)
+        revlistgen = self._rev_list()
         # Find any objects that are git-fat placeholders which are tracked in the repository
         objsizedict = {}
         for objhash, objtype, objsize in revlistgen:
             # files are of blob type
             if objtype == 'blob' and int(objsize) > size:
                 objsizedict[objhash] = objsize
-        for objhash, objpath in self._find_paths(objsizedict.keys(), full_history=True):
+        for objhash, objpath in self._find_paths(objsizedict.keys()):
             print(objhash, objsizedict[objhash], objpath)
 
     def _parse_ls_files(self, line):
@@ -622,6 +718,23 @@ class GitFat(object):
         # File exists but is not a fatfile, don't add it
         return False
 
+    def _pull(self, pattern=None, **kwargs):
+        """ Get orphans, call backend pull """
+        cached_objs = self._cached_objects()
+
+        # TODO: Why use _orphan and _referenced here?
+        if pattern:
+            # filter the working tree by a pattern
+            files = set(digest for digest, fname in self._orphan_files(patterns=(pattern,))) - cached_objs
+        else:
+            # default pull any object referenced but not stored
+            files = self._referenced_objects(**kwargs) - cached_objs
+
+        if self.backend.pull_files(self.objdir, files):
+            self.checkout()
+        else:
+            sys.exit(1)
+
     def pull(self, pattern=None, **kwargs):
         '''
         Pull anything that I have referenced, but not stored
@@ -700,7 +813,7 @@ class GitFat(object):
             tmpstream = os.fdopen(fd, 'w')
 
             # Hash the input, write to temp file
-            digest, _ = self._hash_stream(blockiter, tmpstream)
+            digest, _ = hash_stream(blockiter, tmpstream)
             tmpstream.close()
 
             if digest != o:
@@ -723,25 +836,71 @@ class GitFat(object):
         pass
 
 
+def _get_options(config, backend, cfg_file_path):
+    """ returns the options for a backend in dictionary form """
+    try:
+        opts = dict(config.items(backend))
+    except cfgparser.NoSectionError:
+        err = "No section found in {} for backend {}".format(cfg_file_path, backend)
+        raise RuntimeError(err)
+    return opts
+
+
+def _read_config(cfg_file_path=None):
+    try:
+        root = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
+    except sub.CalledProcessError:
+        error('git-fat must be run from a git directory')
+        sys.exit(1)
+    default_path = os.path.join(root, '.gitfat')
+
+    cfg_file_path = cfg_file_path or default_path
+
+    config = cfgparser.ConfigFile()
+
+    try:
+        config.read(cfg_file_path)
+    except cfgparser.Error:  # TODO: figure out what to catch here
+        raise RuntimeError("Error reading or parsing configfile: {}".format(cfg_file_path))
+    return config
+
+
+def _parse_config(backend=None, cfg_file_path=None):
+    """ Parse the given config file and return the backend instance """
+    config = _read_config(cfg_file_path)
+    if backend is None:
+        try:
+            backend = config.sections()[0]
+        except cfgparser.Error:
+            raise RuntimeError("Error reading or parsing configfile: {}".format(cfg_file_path))
+
+    opts = _get_options(config, backend, cfg_file_path)
+
+    try:
+        Backend = BACKEND_MAP[backend]
+    except IndexError:
+        raise RuntimeError("Unknown backend specified: {}".format(backend))
+
+    return Backend(**opts)
+
+
+run = lambda x: x
+
+def run(backend, name, **kwargs):
+    gitfat = GitFat(backend, **kwargs)
+    fn = name.replace("-", "_")
+    if hasattr(gitfat, fn):
+        getattr(gitfat, fn)(**kwargs)
+
 def main():
 
     import argparse
-
-    show_help_and_exit = False
-
-    try:
-        if sys.argv[1] in [c + 'version' for c in '', '-', '--']:
-            print(__version__)
-            sys.exit(0)
-    except IndexError:
-        show_help_and_exit = True
-
-    fat = GitFat()
 
     parser = argparse.ArgumentParser(usage=("%(prog)s [global options] command [command options]\n"
         "       %(prog)s -h for full usage."))  # Six spaces for len('usage: ')
     subparser = parser.add_subparsers()
 
+    # Global options
     parser.add_argument('-a', "--full-history", dest='full_history', action='store_true',
         help='Look for git-fat placeholder files in the entire history instead of just the working copy')
     parser.add_argument('-v', "--verbose", dest='verbose', action='store_true',
@@ -749,81 +908,77 @@ def main():
 
     # Empty function for legacy api; config gets called every time
     # (assuming if user is calling git-fat they want it configured)
-    parser_init = subparser.add_parser('init',
+    sp = subparser.add_parser('init',
         help='Initialize git-fat')
-    parser_init.set_defaults(func=empty)
+    sp.set_defaults(func=empty)
 
-    parser_filter_clean = subparser.add_parser('filter-clean',
+    sp = subparser.add_parser('filter-clean',
         help='filter-clean to be called only by git')
-    parser_filter_clean.add_argument("cur_file", nargs="?")
-    parser_filter_clean.set_defaults(func=fat.filter_clean)
+    sp.add_argument("cur_file", nargs="?")
+    sp.set_defaults(func='filter_clean')
 
-    parser_filter_smudge = subparser.add_parser('filter-smudge',
+    sp = subparser.add_parser('filter-smudge',
         help='filter-smudge to be called only by git')
-    parser_filter_smudge.add_argument("cur_file", nargs="?")  # Currently unused
-    parser_filter_smudge.set_defaults(func=fat.filter_smudge)
+    sp.add_argument("cur_file", nargs="?")  # Currently unused
+    sp.set_defaults(func='filter_smudge')
 
-    parser_push = subparser.add_parser('push',
+    sp = subparser.add_parser('push',
         help='push cache to remote git-fat server')
-    parser_push.set_defaults(func=fat.push)
+    sp.set_defaults(func='push')
 
-    parser_pull = subparser.add_parser('pull',
+    sp = subparser.add_parser('pull',
         help='pull fatfiles from remote git-fat server')
-    parser_pull.add_argument("pattern", nargs="?",
+    sp.add_argument("pattern", nargs="?",
         help='pull only files matching pattern')
-    parser_pull.set_defaults(func=fat.pull)
+    sp.set_defaults(func='pull')
 
-    parser_checkout = subparser.add_parser('checkout',
+    sp = subparser.add_parser('checkout',
         help='resmudge all orphan objects')
-    parser_checkout.set_defaults(func=fat.checkout)
+    sp.set_defaults(func='checkout')
 
-    parser_find = subparser.add_parser('find',
+    sp = subparser.add_parser('find',
         help='find all objects over [size]')
-    parser_find.add_argument("size", type=int,
+    sp.add_argument("size", type=int,
         help='threshold size in bytes')
-    parser_find.set_defaults(func=fat.find)
+    sp.set_defaults(func='find')
 
-    parser_status = subparser.add_parser('status',
+    sp = subparser.add_parser('status',
         help='print orphan and stale objects')
-    parser_status.set_defaults(func=fat.status)
+    sp.set_defaults(func='status')
 
-    parser_list = subparser.add_parser('list',
+    sp = subparser.add_parser('list',
         help='list all files managed by git-fat')
-    parser_list.set_defaults(func=fat.list_files)
+    sp.set_defaults(func='list_files')
 
-    parser_list = subparser.add_parser('pull-http',
+    sp = subparser.add_parser('pull-http',
         help='anonymously download git-fat files over http')
-    parser_list.set_defaults(func=fat.http_pull)
+    sp.set_defaults(func='http_pull')
 
-    parser_index_filter = subparser.add_parser('index-filter',
+    sp = subparser.add_parser('index-filter',
         help='git fat index-filter for filter-branch')
-    parser_index_filter.add_argument('filelist',
+    sp.add_argument('filelist',
         help='file containing all files to import to git-fat')
-    parser_index_filter.add_argument('-x', dest='add_gitattributes',
+    sp.add_argument('-x', dest='add_gitattributes',
         help='prevent adding excluded to .gitattributes', action='store_false')
-    parser_index_filter.set_defaults(func=fat.index_filter)
+    sp.set_defaults(func='index_filter')
 
-    # defined if there are no argv
-    if show_help_and_exit:
+    try:
+        if sys.argv[1] in [c + 'version' for c in '', '-', '--']:
+            print(__version__)
+            sys.exit(0)
+    except IndexError:
         parser.print_help()
         sys.exit(0)
 
+    backend = _parse_config()
+
     args = parser.parse_args()
-
     kwargs = dict(vars(args))
-    del kwargs['func']
-
-    # First configure git-fat
-    fat.configure(**kwargs)
-
-    # don't need this after configuring, breaks functions because of kwargs
-    del kwargs['verbose']
-    # Then execute function
     try:
-        args.func(**kwargs)
+        run(backend, **kwargs)
     except:
         if kwargs.get('cur_file'):
-            fat.verbose("ERROR: processing file: " + kwargs.get('cur_file'))
+            error("ERROR: processing file: " + kwargs.get('cur_file'))
         raise
 
 
