@@ -737,10 +737,10 @@ class GitFat(object):
             # default pull any object referenced but not stored
             files = self._referenced_objects(**kwargs) - cached_objs
 
-        if self.backend.pull_files(files):
-            self.checkout()
-        else:
+        if not self.backend.pull_files(files):
             sys.exit(1)
+        # Make sure they're up to date
+        self.checkout()
 
     def push(self, pattern=None, **kwargs):
         # We only want the intersection of the referenced files and ones we have cached
