@@ -249,10 +249,6 @@ class RSyncBackend(BackendInterface):
             logging.error("No remote url configured for rsync")
             sys.exit(1)
 
-        if not ssh_user:
-            logging.error("sshuser required for rsync remote")
-            sys.exit(1)
-
         self.remote_url = remote_url
         self.ssh_user = ssh_user
         self.ssh_port = ssh_port
@@ -269,7 +265,11 @@ class RSyncBackend(BackendInterface):
 
         # extra must be passed in as single argv, which is why it's
         # not in the template and split isn't called on it
-        extra = '--rsh=ssh -l {} -p {}'.format(self.ssh_user, self.ssh_port)
+        extra = '--rsh=ssh'
+        if self.ssh_user:
+            extra = ' '.join([extra, '-l {}'.format(self.ssh_user)])
+        if self.ssh_port:
+            extra = ' '.join([extra, '-p {}'.format(self.ssh_port)])
         cmd.append(extra)
         return cmd
 
@@ -843,7 +843,7 @@ def main():
     # Empty function for legacy api; config gets called every time
     # (assuming if user is calling git-fat they want it configured)
     sp = subparser.add_parser('init', help='Initialize git-fat')
-    sp.set_defaults(func=empty)
+    sp.set_defaults(func="init")
 
     sp = subparser.add_parser('filter-clean', help='filter-clean to be called only by git')
     sp.add_argument("cur_file", nargs="?")
@@ -890,10 +890,14 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    backend = _parse_config()
 
     args = parser.parse_args()
     kwargs = dict(vars(args))
+
+    if kwargs.get('func') == "init":
+        sys.exit(0)
+
+    backend = _parse_config()
     try:
         run(backend, **kwargs)
     except:
