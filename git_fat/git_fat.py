@@ -582,6 +582,60 @@ class GitFat(object):
         filename = tail.strip()
         return mode, blobhash, stageno, filename
 
+    def _get_old_gitattributes(self):
+        """ Get the last .gitattributes file in HEAD, and return it """
+        ls_ga = git('ls-files -s .gitattributes'.split(), stdout=sub.PIPE)
+        lsout = ls_ga.stdout.read().strip()
+        ls_ga.wait()
+        if lsout:  # Always try to get the old gitattributes
+            ga_mode, ga_hash, ga_stno, _ = self._parse_ls_files(lsout)
+            ga_cat = git('cat-file blob {0}'.format(ga_hash).split(), stdout=sub.PIPE)
+            old_ga = ga_cat.stdout.read().splitlines()
+            ga_cat.wait()
+        else:
+            ga_mode, ga_stno, old_ga = '100644', '0', []
+        return old_ga, ga_mode, ga_stno
+
+    def _update_index(self, uip, mode, content, stageno, filename):
+        fmt = '{0} {1} {2}\t{3}\n'
+        uip.stdin.write(fmt.format(mode, content, stageno, filename))
+
+    def _add_gitattributes(self, newfiles, update_index):
+        """ Find the previous gitattributes file, and append to it """
+
+        old_ga, ga_mode, ga_stno = self._get_old_gitattributes()
+        ga_hashobj = git('hash-object -w --stdin'.split(), stdin=sub.PIPE,
+            stdout=sub.PIPE)
+        # Add lines to the .gitattributes file
+        new_ga = old_ga + ['{0} filter=fat -text'.format(f) for f in newfiles]
+        stdout, _ = ga_hashobj.communicate('\n'.join(new_ga) + '\n')
+        self._update_index(ga_mode, stdout.strip(), ga_stno, '.gitattributes')
+        return ga_mode, stdout.strip(), ga_stno, '.gitattributes'
+
+    def _process_index_filter_line(self, line, update_index, workdir, excludes):
+
+        mode, blobhash, stageno, filename = self._parse_ls_files(line)
+
+        if filename not in excludes or mode == "120000":
+            return None
+        # Save file to update .gitattributes
+        cleanedobj_hash = os.path.join(workdir, blobhash)
+        # if it hasn't already been cleaned
+        if not os.path.exists(cleanedobj_hash):
+            catfile = git('cat-file blob {0}'.format(blobhash).split(), stdout=sub.PIPE)
+            hashobj = git('hash-object -w --stdin'.split(), stdin=sub.PIPE, stdout=sub.PIPE)
+            self._filter_clean(catfile.stdout, hashobj.stdin)
+            hashobj.stdin.close()
+            objhash = hashobj.stdout.read().strip()
+            catfile.wait()
+            hashobj.wait()
+            with open(cleanedobj_hash, 'w') as cleaned:
+                cleaned.write(objhash + '\n')
+        else:
+            with open(cleanedobj_hash) as cleaned:
+                objhash = cleaned.read().strip()
+        return mode, objhash, stageno, filename
+
     def index_filter(self, filelist, add_gitattributes=True, **kwargs):
 
         workdir = os.path.join(self.gitdir, 'fat', 'index-filter')
@@ -591,56 +645,25 @@ class GitFat(object):
             files_to_exclude = excludes.read().splitlines()
 
         ls_files = git('ls-files -s'.split(), stdout=sub.PIPE)
-        update_index = git('update-index --index-info'.split(), stdin=sub.PIPE)
-        lsfmt = '{0} {1} {2}\t{3}\n'
+        uip = git('update-index --index-info'.split(), stdin=sub.PIPE)
 
         newfiles = []
         for line in ls_files.stdout:
-            mode, blobhash, stageno, filename = self._parse_ls_files(line)
+            newfile = self._process_index_filter_line(line)
+            if newfile:
+                self._update_index(uip, *newfile)
+                # The filename is in the last position
+                newfiles.append(newfile[-1])
 
-            if filename not in files_to_exclude or mode == "120000":
-                continue
-            # Save file to update .gitattributes
-            newfiles.append(filename)
-            cleanedobj_hash = os.path.join(workdir, blobhash)
-            # if it hasn't already been cleaned
-            if not os.path.exists(cleanedobj_hash):
-                catfile = git('cat-file blob {0}'.format(blobhash).split(), stdout=sub.PIPE)
-                hashobj = git('hash-object -w --stdin'.split(), stdin=sub.PIPE, stdout=sub.PIPE)
-                self._filter_clean(catfile.stdout, hashobj.stdin)
-                hashobj.stdin.close()
-                objhash = hashobj.stdout.read().strip()
-                catfile.wait()
-                hashobj.wait()
-                with open(cleanedobj_hash, 'w') as cleaned:
-                    cleaned.write(objhash + '\n')
-            else:
-                with open(cleanedobj_hash) as cleaned:
-                    objhash = cleaned.read().strip()
-            # Write the placeholder to the index
-            update_index.stdin.write(lsfmt.format(mode, objhash, stageno, filename))
+        newfiles = self._filter_clean_index(ls_files.stdout, files_to_exclude)
 
         if add_gitattributes:
-            ls_ga = git('ls-files -s .gitattributes'.split(), stdout=sub.PIPE)
-            lsout = ls_ga.stdout.read().strip()
-            ls_ga.wait()
-            if lsout:  # Always try to get the old gitattributes
-                ga_mode, ga_hash, ga_stno, _ = self._parse_ls_files(lsout)
-                ga_cat = git('cat-file blob {0}'.format(ga_hash).split(), stdout=sub.PIPE)
-                old_ga = ga_cat.stdout.read().splitlines()
-                ga_cat.wait()
-            else:
-                ga_mode, ga_stno, old_ga = '100644', '0', []
-            ga_hashobj = git('hash-object -w --stdin'.split(), stdin=sub.PIPE,
-                stdout=sub.PIPE)
-            new_ga = old_ga + ['{0} filter=fat -text'.format(f) for f in newfiles]
-            stdout, _ = ga_hashobj.communicate('\n'.join(new_ga) + '\n')
-            update_index.stdin.write(lsfmt.format(ga_mode, stdout.strip(),
-                ga_stno, '.gitattributes'))
+            # Add the files to the gitattributes file and update the index
+            self._update_index(uip, *self._add_gitattributes(newfiles))
 
         ls_files.wait()
-        update_index.stdin.close()
-        update_index.wait()
+        uip.stdin.close()
+        uip.wait()
 
     def list_files(self, **kwargs):
         '''
