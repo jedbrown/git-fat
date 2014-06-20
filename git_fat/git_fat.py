@@ -54,14 +54,6 @@ def git(cliargs, *args, **kwargs):
     return sub.Popen(['git'] + cliargs, *args, **kwargs)
 
 
-def error(*args, **kwargs):
-    return print(*args, file=sys.stderr, **kwargs)
-
-
-def empty(*args, **kwargs):
-    pass
-
-
 def mkdir_p(path):
     import errno
     try:
@@ -829,7 +821,6 @@ def run(backend, **kwargs):
 
 
 def main():
-
     import argparse
 
     parser = argparse.ArgumentParser(usage=("%(prog)s [global options] command [command options]\n"
@@ -889,7 +880,6 @@ def main():
     except IndexError:
         parser.print_help()
         sys.exit(1)
-
 
     args = parser.parse_args()
     kwargs = dict(vars(args))
