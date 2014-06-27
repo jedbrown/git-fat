@@ -6,6 +6,9 @@ import unittest
 import logging
 
 
+logging.basicConfig(format='%(levelname)s:%(filename)s:%(message)s',  level=logging.DEBUG)
+
+
 def call(cmd, *args, **kwargs):
 
     if isinstance(cmd, str):
@@ -21,7 +24,6 @@ def call(cmd, *args, **kwargs):
         logging.error("cmd `{}` returned {}\n".format(e.cmd, e.returncode))
         logging.error("The output of the command was: \n")
         logging.error("{}\n".format(e.output))
-
     return output
 
 
@@ -52,24 +54,35 @@ class BaseTestCase(unittest.TestCase):
         os.chdir(self.tempdir)
 
         self.fatstore = os.path.join(self.tempdir, 'fat-store')
-        self.repo = os.path.join(self.tempdir, 'fat-test1')
+        os.mkdir(self.fatstore)
 
+        self.repo = os.path.join(self.tempdir, 'fat-test1')
         git('init {}'.format(self.repo))
         os.chdir(self.repo)
 
     def tearDown(self):
-        shutil.rmtree(self.tempdir)
-
-        os.environ["PATH"] = self.oldpath
+        # Only cleanup if successful so we can inspect results
+        if self._resultForDoCleanups.wasSuccessful():
+            shutil.rmtree(self.tempdir)
+            os.environ["PATH"] = self.oldpath
 
 
 class HappyTestCase(BaseTestCase):
 
     def test_git_fat_init(self):
+        with open('.gitfat', 'w') as f:
+            f.write('[copy]\nremote={}'.format(self.fatstore))
         out = git('fat init')
         expect = 'Setting filters in .git/config\nCreating .git/fat/objects\nInitialized git-fat'.strip()
         self.assertEqual(out.strip(), expect)
         self.assertTrue(os.path.isdir('.git/fat/objects'))
+
+        out = git('config filter.fat.clean')
+        self.assertEqual(out.strip(), 'git-fat filter-clean %f')
+
+        out = git('config filter.fat.smudge')
+        self.assertEqual(out.strip(), 'git-fat filter-smudge %f')
+
 
 
 if __name__ == "__main__":

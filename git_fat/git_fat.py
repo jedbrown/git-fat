@@ -47,7 +47,7 @@ BLOCK_SIZE = 4096
 
 NOT_IMPLEMENTED_MESSAGE = "This method isn't implemented for this backend!"
 
-logging.basicConfig(format='%(levelname)s:%(filename)s:%(message)s')
+logging.basicConfig(format='%(levelname)s:%(filename)s:%(message)s', level=logging.DEBUG)
 
 
 def git(cliargs, *args, **kwargs):
@@ -853,7 +853,7 @@ def main():
     # Empty function for legacy api; config gets called every time
     # (assuming if user is calling git-fat they want it configured)
     sp = subparser.add_parser('init', help='Initialize git-fat')
-    sp.set_defaults(func="init")
+    sp.set_defaults(func="configure")
 
     sp = subparser.add_parser('filter-clean', help='filter-clean to be called only by git')
     sp.add_argument("cur_file", nargs="?")
@@ -903,8 +903,8 @@ def main():
     args = parser.parse_args()
     kwargs = dict(vars(args))
 
-    if kwargs.get('func') == "init":
-        sys.exit(0)
+#    if kwargs.get('func') == "init":
+#        sys.exit(0)
 
     try:
         backend = _parse_config()
