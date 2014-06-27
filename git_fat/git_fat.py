@@ -11,6 +11,7 @@ import tempfile
 import warnings
 import ConfigParser as cfgparser
 import logging
+import shutil
 
 try:
     from subprocess import check_output
@@ -119,8 +120,7 @@ def _config_path(path=None):
     try:
         root = sub.check_output('git rev-parse --show-toplevel'.split()).strip()
     except sub.CalledProcessError:
-        logging.error('git-fat must be run from a git directory')
-        sys.exit(1)
+        raise RuntimeError('git-fat must be run from a git directory')
     default_path = os.path.join(root, '.gitfat')
     path = path or default_path
     return path
@@ -130,8 +130,7 @@ def _obj_dir():
     try:
         gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
     except sub.CalledProcessError:
-        logging.error('git-fat must be run from a git directory')
-        sys.exit(1)
+        raise RuntimeError('git-fat must be run from a git directory')
     objdir = os.path.join(gitdir, 'fat', 'objects')
     return objdir
 
@@ -181,18 +180,38 @@ class BackendInterface(object):
         raise NotImplementedError(NOT_IMPLEMENTED_MESSAGE)
 
 
+class CopyBackend(BackendInterface):
+    def __init__(self, base_dir, **kwargs):
+        other_path = kwargs.get('remote')
+        if not os.path.isdir(other_path):
+            raise RuntimeError('copybackend target path is not directory: {}'.format(other_path))
+
+        self.other_path = other_path
+        self.base_dir = base_dir
+
+    def pull_files(self, file_list):
+
+        for f in file_list:
+            fullpath = os.path.join(self.other_path, f)
+            shutil.copy2(fullpath, self.base_dir)
+
+    def push_files(self, file_list):
+
+        for f in file_list:
+            fullpath = os.path.join(self.base_dir, f)
+            shutil.copy2(fullpath, self.other_path)
+
+
 class HTTPBackend(BackendInterface):
     """ Pull files from an HTTP server """
 
     def __init__(self, base_dir, **kwargs):
         remote_url = kwargs.get('remote')
         if not remote_url:
-            logging.error('No remote url configured for http backend')
-            sys.exit(1)
+            raise RuntimeError('No remote url configured for http backend')
 
         if not remote_url.startswith('http') or remote_url.startswith('https'):
-            logging.error('http remote url must start with http:// or https://')
-            sys.exit(1)
+            raise RuntimeError('http remote url must start with http:// or https://')
 
         self.remote_url = remote_url
         self.base_dir = base_dir
@@ -238,8 +257,7 @@ class RSyncBackend(BackendInterface):
         ssh_port = kwargs.get('sshport', '22')
 
         if not remote_url:
-            logging.error("No remote url configured for rsync")
-            sys.exit(1)
+            raise RuntimeError("No remote url configured for rsync")
 
         self.remote_url = remote_url
         self.ssh_user = ssh_user
@@ -283,6 +301,7 @@ class RSyncBackend(BackendInterface):
 BACKEND_MAP = {
     'rsync': RSyncBackend,
     'http': HTTPBackend,
+    'copy': CopyBackend,
 }
 
 
@@ -887,9 +906,12 @@ def main():
     if kwargs.get('func') == "init":
         sys.exit(0)
 
-    backend = _parse_config()
     try:
+        backend = _parse_config()
         run(backend, **kwargs)
+    except RuntimeError as err:
+        logging.error(str(err))
+        sys.exit(1)
     except:
         if kwargs.get('cur_file'):
             logging.error("processing file: " + kwargs.get('cur_file'))
