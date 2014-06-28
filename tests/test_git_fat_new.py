@@ -145,7 +145,6 @@ class InitTestCase(Base):
 class InitRepoTestCase(Base):
 
     def setUp(self):
-
         super(InitRepoTestCase, self).setUp()
 
         self._setup_gitfat_files()
@@ -178,9 +177,54 @@ class GeneralTestCase(InitRepoTestCase):
 
     def setUp(self):
         super(GeneralTestCase, self).setUp()
-        # Add a few fat files
-        # different sizes, names
-        # commit
+
+        filename = 'a.fat'
+        contents = 'a'
+        with open(filename, 'w') as f:
+            f.write(contents*1024)
+        filename = 'b.fat'
+        with open(filename, 'w') as f:
+            f.write(contents*1024*1024)
+        filename = 'c d e.fat'
+        with open(filename, 'w') as f:
+            f.write(contents*2048*1024)
+        commit("add fatfiles")
+
+    def test_status(self):
+        # all there
+        # orphans
+        # stale
+        out = git('fat status')
+        self.assertEqual(out, '')
+        objhash = read_index('b.fat').split()[2]
+        path = os.path.join(os.getcwd(), '.git/fat/objects', objhash)
+        os.rename(path, os.path.join(self.tempdir, path))
+        os.remove('b.fat')
+
+        # get the hash
+        out = git('fat status')
+        self.assertTrue('Orphan' in out)
+        self.assertTrue(objhash in out)
+
+        commit('remove file')
+
+        os.rename(os.path.join(self.tempdir, path), path)
+
+        # get the hash
+        out = git('fat status')
+        self.assertTrue('Stale' in out)
+        self.assertTrue(objhash in out)
+
+    def test_list(self):
+        pass
+
+    def test_find(self):
+        pass
+
+    def test_checkout(self):
+        # not sure how to test this
+        pass
+
 
 # TODO: status, list, find, checkout, full-history
 # TODO: pluggable Backend test
