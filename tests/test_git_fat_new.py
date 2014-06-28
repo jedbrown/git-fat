@@ -198,17 +198,23 @@ class GeneralTestCase(InitRepoTestCase):
         self.assertEqual(out, '')
         objhash = read_index('b.fat').split()[2]
         path = os.path.join(os.getcwd(), '.git/fat/objects', objhash)
-        os.rename(path, os.path.join(self.tempdir, path))
+        os.rename(path, os.path.join(self.tempdir, objhash))
         os.remove('b.fat')
+
+        # Need to checkout the file again so that it can be re-smudged
+        git('checkout b.fat')
 
         # get the hash
         out = git('fat status')
         self.assertTrue('Orphan' in out)
         self.assertTrue(objhash in out)
 
+        # Remove the file again
+        os.remove('b.fat')
+        # commit this time
         commit('remove file')
 
-        os.rename(os.path.join(self.tempdir, path), path)
+        os.rename(os.path.join(self.tempdir, objhash), path)
 
         # get the hash
         out = git('fat status')
