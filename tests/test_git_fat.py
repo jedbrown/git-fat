@@ -1,11 +1,12 @@
 import os
 import shutil
 import subprocess as sub
-import sys
 import tempfile
 import unittest
+import logging
 
-printerr = sys.stderr.write
+
+logging.basicConfig(format='%(levelname)s:%(filename)s:%(message)s')
 
 
 def call(cmd, *args, **kwargs):
@@ -13,73 +14,82 @@ def call(cmd, *args, **kwargs):
     if isinstance(cmd, str):
         cmd = cmd.split()
 
-    # Uncomment to see command execution
-    # print('`{}`'.format(' '.join(cmd)))
+    logging.info('`{}`'.format(' '.join(cmd)))
 
     try:
-        # output = sub.check_output(cmd, stderr=sub.STDOUT, *args, **kwargs)
         output = sub.check_output(cmd, *args, **kwargs)
-        # sub.call(cmd, *args, **kwargs)
+
     except sub.CalledProcessError as e:
-        printerr("cmd `{}` returned {}\n".format(e.cmd, e.returncode))
-        printerr("The output of the command was: \n")
-        printerr("{}\n".format(e.output))
+        logging.error("cmd `{}` returned {}\n".format(e.cmd, e.returncode))
+        logging.error("The output of the command was: \n")
+        logging.error("{}\n".format(e.output))
     return output
 
 
 def git(cliargs, *args, **kwargs):
-
     if isinstance(cliargs, str):
         cliargs = cliargs.split()
     cmd = ['git'] + cliargs
     return call(cmd)
 
 
-class GitFatTest(unittest.TestCase):
+def commit(message):
+    git('add -A')
+    git(['commit', '-m', message])
 
-    def setUp(self):  # noqa
 
-        self.tempdir = tempfile.mkdtemp(prefix='git-fat-test')
+def read_index(filename):
+    objhash = git(['hash-object', filename])
+    contents = git('cat-file -p {}'.format(objhash))
+    return contents
+
+
+class Base(unittest.TestCase):
+
+    def setUp(self):
+        """ Get me into an initialized git directory! """
+        # Configure path to use development git-fat binary script
+        self.oldpath = os.environ["PATH"]
+        test_dir = os.path.dirname(os.path.realpath(__file__))
+        os.environ["PATH"] = ':'.join([test_dir] + self.oldpath.split(':'))
+
         self.olddir = os.getcwd()
+
+        # Can't test in the repo
+        # Easiest way is to do it in temp dir
+        self.tempdir = tempfile.mkdtemp(prefix='git-fat-test')
+        logging.info("tempdir: {}".format(self.tempdir))
+
         os.chdir(self.tempdir)
+
         self.fatstore = os.path.join(self.tempdir, 'fat-store')
+        os.mkdir(self.fatstore)
 
-        self.repo1 = os.path.join(self.tempdir, 'fat-test1')
-        self.repo2 = os.path.join(self.tempdir, 'fat-test2')
-        self.repos = [self.repo1, self.repo2]
+        self.repo = os.path.join(self.tempdir, 'fat-test1')
+        git('init {}'.format(self.repo))
+        os.chdir(self.repo)
 
-    def tearDown(self):  # noqa
+    def _setup_gitfat_files(self):
+        with open('.gitfat', 'w') as f:
+            f.write('[copy]\nremote={}'.format(self.fatstore))
+        with open('.gitattributes', 'w') as f:
+            f.write('*.fat filter=fat -crlf')
 
-        # move all the coverage files
-        for r, d, files in os.walk(self.tempdir):
-            for f in files:
-                if f.startswith('.coverage'):
-                    shutil.copy2(os.path.join(r, f),
-                        os.path.join(self.olddir, f))
-
+    def tearDown(self):
         os.chdir(self.olddir)
-
-        # Comment out below to inspect results
         shutil.rmtree(self.tempdir)
+        os.environ["PATH"] = self.oldpath
 
-    def test_git_fat_happy(self):
 
-        git('init {}'.format(self.repo1))
-        os.chdir(self.repo1)
+class InitTestCase(Base):
 
-        # Test 0 length existing file
-        with open('f.fat', 'w') as f:
-            f.write('')
-
-        # Do this first so it doesn't become a fat file
-        os.symlink('/oe/dss-oe/dss-add-ons-testing-build/deploy/licenses/common-licenses/GPL-3', 'c.fat')
-        git('add c.fat f.fat')
-        git(['commit', '-madded legacy file'])
-
+    def test_git_fat_init(self):
+        with open('.gitfat', 'w') as f:
+            f.write('[copy]\nremote={}'.format(self.fatstore))
         out = git('fat init')
         expect = 'Setting filters in .git/config\nCreating .git/fat/objects\nInitialized git-fat'.strip()
         self.assertEqual(out.strip(), expect)
-        self.assertTrue('objects' in os.listdir('.git/fat/'))
+        self.assertTrue(os.path.isdir('.git/fat/objects'))
 
         out = git('config filter.fat.clean')
         self.assertEqual(out.strip(), 'git-fat filter-clean %f')
@@ -87,194 +97,154 @@ class GitFatTest(unittest.TestCase):
         out = git('config filter.fat.smudge')
         self.assertEqual(out.strip(), 'git-fat filter-smudge %f')
 
-        with open('.gitfat', 'w') as f:
-            f.write('[rsync]\nremote=localhost:{}'.format(self.fatstore))
+    def test_existing_files_pattern_match(self):
+        """ Don't convert existing files into git-fat files unless they get renamed """
 
-        with open('.gitattributes', 'w') as f:
-            f.write('*.fat filter=fat -crlf')
-
-        git('add .gitattributes .gitfat')
-        git(['commit', '-m"new repository'])
-
-        contents = 'This is a fat file\n'
+        expect = 'a fat file'
         with open('a.fat', 'w') as f:
-            f.write(contents)
+            f.write(expect)
 
-        git('add a.fat')
-        git(['commit', '-madded fatfile'])
+        commit('initial')
 
-        git('fat push')
-
-        os.chdir(self.tempdir)
-
-        git('clone {} {}'.format(self.repo1, self.repo2))
-
-        os.chdir(self.repo2)
+        # Setup git-fat after first commit
+        self._setup_gitfat_files()
         git('fat init')
-        out = git('fat pull')
+
+        # Initializing git-fat doesn't convert it
         with open('a.fat', 'r') as f:
-            # Validate the file contents are correct (This tests the git race condition)
-            self.assertEquals(f.read(), contents)
+            actual = f.read()
+        self.assertEqual(expect, actual)
+        actual = read_index('a.fat')
+        self.assertEqual(expect, actual)
 
-        out = git('fat list')
-        self.assertTrue('a.fat' in out)
+        # change the repo without changing a.fat
+        with open('README', 'w') as f:
+            f.write("something else changed")
+        commit('a.fat doesnt change')
+        actual = read_index('a.fat')
+        self.assertEqual(expect, actual)
 
-        out = git('fat status')
+        # changing the file alone doesn't convert it
+        append_me = '\nmore stuff'
+        with open('a.fat', 'a') as f:
+            f.write(append_me)
+        commit('a.fat changed')
+        actual = read_index('a.fat')
+        self.assertEqual(expect + append_me, actual)
 
-    def test_git_fat_config(self):
+        # finally, rename the file
+        os.rename('a.fat', 'b.fat')
+        commit('a.fat->b.fat')
+        actual = read_index('b.fat')
+        expect = '#$# git-fat ebf646b3730c9f5ec2625081eb488c55000f622e                   21\n'
+        self.assertEqual(expect, actual)
 
-        git('init {}'.format(self.repo1))
 
-        check = sub.Popen('git fat status'.split(), stdout=sub.PIPE, stderr=sub.STDOUT)
-        self.assertEqual(check.wait(), 1)
-        self.assertTrue('run from a git' in check.stdout.read())
+class InitRepoTestCase(Base):
 
-        os.chdir(self.repo1)
+    def setUp(self):
+        super(InitRepoTestCase, self).setUp()
 
-        check = sub.Popen('git fat push'.split(), stdout=sub.PIPE, stderr=sub.STDOUT)
-        self.assertEqual(check.wait(), 1)
-        self.assertTrue('.gitfat is present' in check.stdout.read())
-
-        with open('.gitfat', 'w') as f:
-            f.write('')
-        check = sub.Popen('git fat push'.split(), stdout=sub.PIPE, stderr=sub.STDOUT)
-        self.assertEqual(check.wait(), 1)
-        self.assertTrue('No rsync.remote' in check.stdout.read())
-
-    def test_git_fat_status(self):
-
-        git('init {}'.format(self.repo1))
-        os.chdir(self.repo1)
+        self._setup_gitfat_files()
         git('fat init')
+        commit('inital')
 
-        with open('.gitfat', 'w') as f:
-            f.write('[rsync]\nremote=localhost:{}'.format(self.fatstore))
 
-        with open('.gitattributes', 'w') as f:
-            f.write('*.fat filter=fat -crlf')
+class FileTypeTestCase(InitRepoTestCase):
 
-        git('add .gitattributes .gitfat')
-        git(['commit', '-m"new repository'])
-
-        contents = 'This is a fat file\n'
-        with open('a.fat', 'w') as f:
-            f.write(contents)
-
-        git('add a.fat')
-        git(['commit', '-madded fatfile'])
-
-        a_digest = os.listdir('.git/fat/objects')[0]
-
-        # Change contents to make stale
-        git('mv a.fat b.fat')
-        with open('b.fat', 'a') as f:
-            f.write(contents)
-
-        git('add b.fat')
-        git(['commit', '-mupdated fatfile'])
-
-        b_digest = list(set(os.listdir('.git/fat/objects')) - set([a_digest]))[0]
-        # Remove a file to make an orphan
-        os.remove(os.path.join(self.repo1, '.git/fat/objects/', b_digest))
-
-        out = git('fat status')
-        self.assertTrue('Stale' in out)
-        self.assertTrue('Orphan' in out)
-
-        # Traversing the history we can see that the file
-        # in .git/fat/objects belongs to a.fat
-        out = git('fat -a status')
-        self.assertTrue('Stale' not in out)
+    def test_symlink_74bytes(self):
+        """ Verify symlinks which match magiclen don't get converted """
+        # Create broken symlink
+        # is exactly 74 bytes, the magic length
+        os.symlink('/oe/dss-oe/dss-add-ons-testing-build/deploy/licenses/common-licenses/GPL-3', 'c.fat')
+        git('add c.fat')
+        git('commit -m"added_symlink"')
+        self.assertTrue(os.path.islink('c.fat'))
 
     def test_file_with_spaces(self):
-
-        git('init {}'.format(self.repo1))
-        os.chdir(self.repo1)
-
-        out = git('fat init')
-        with open('.gitfat', 'w') as f:
-            f.write('[rsync]\nremote=localhost:{}'.format(self.fatstore))
-
-        with open('.gitattributes', 'w') as f:
-            f.write('*.fat filter=fat -crlf')
-
-        git('add .gitattributes .gitfat')
-        git(['commit', '-m"new repository'])
-
+        """ Ensure that files with spaces don't make git-fat barf """
         contents = 'This is a fat file\n'
         filename = 'A fat file with spaces.fat'
         with open(filename, 'w') as f:
             f.write(contents)
+        commit("Nobody expects a space inafilename")
+        self.assertTrue('#$# git-fat ' in read_index(filename))
 
-        git(['add', filename])
-        git(['commit', '-madded fatfile'])
 
-        git('fat push')
+class GeneralTestCase(InitRepoTestCase):
 
-        os.chdir(self.tempdir)
+    def setUp(self):
+        super(GeneralTestCase, self).setUp()
 
-        git('clone {} {}'.format(self.repo1, self.repo2))
+        filename = 'a.fat'
+        contents = 'a'
+        with open(filename, 'w') as f:
+            f.write(contents * 1024)
+        filename = 'b.fat'
+        with open(filename, 'w') as f:
+            f.write(contents * 1024 * 1024)
+        filename = 'c d e.fat'
+        with open(filename, 'w') as f:
+            f.write(contents * 2048 * 1024)
+        commit("add fatfiles")
 
-        os.chdir(self.repo2)
-        git('fat init')
-        out = git('fat pull')
-        with open(filename, 'r') as f:
-            # Validate the file contents are correct (This tests the git race condition)
-            self.assertEquals(f.read(), contents)
+    def test_status(self):
+        out = git('fat status')
+        self.assertEqual(out, '')
+        objhash = read_index('b.fat').split()[2]
+        path = os.path.join(os.getcwd(), '.git/fat/objects', objhash)
+        os.rename(path, os.path.join(self.tempdir, objhash))
+        os.remove('b.fat')
+
+        # Need to checkout the file again so that it can be re-smudged
+        git('checkout b.fat')
+
+        # get the hash
+        out = git('fat status')
+        self.assertTrue('Orphan' in out)
+        self.assertTrue(objhash in out)
+
+        # Remove the file again
+        os.remove('b.fat')
+        # commit this time
+        commit('remove file')
+
+        os.rename(os.path.join(self.tempdir, objhash), path)
+        # get the hash
+        out = git('fat status')
+        self.assertTrue('Stale' in out)
+        self.assertTrue(objhash in out)
+
+    def test_list(self):
+        files = ('a.fat', 'b.fat', 'c d e.fat')
+        hashes = {f: read_index(f).split()[2] for f in files}
 
         out = git('fat list')
-        self.assertTrue(filename in out)
+        lines = out.split('\n')[:-1]  # ignore trailing newline
+        for line in lines:
+            objhash, filename = line.split(' ', 1)
+            self.assertEqual(hashes[filename], objhash)
 
-        out = git('fat status')
+    def test_find(self):
+        contents = 'b'
 
-    def test_git_fat_regression(self):
-
-        git('init {}'.format(self.repo1))
-        os.chdir(self.repo1)
-
-        # Test that existing files don't get converted
-        with open('f.fat', 'w') as f:
-            f.write('a' * 100)
-
-        git('add f.fat')
-        git(['commit', '-madded legacy file'])
-
-        out = git('fat init')
-        expect = 'Setting filters in .git/config\nCreating .git/fat/objects\nInitialized git-fat'.strip()
-        self.assertEqual(out.strip(), expect)
-        self.assertTrue('objects' in os.listdir('.git/fat/'))
-
-        with open('.gitfat', 'w') as f:
-            f.write('[rsync]\nremote=localhost:{}'.format(self.fatstore))
-
-        with open('.gitattributes', 'w') as f:
-            f.write('*.fat filter=fat -crlf')
-
-        git('add .gitattributes .gitfat')
-        git(['commit', '-m"new repository'])
-
-        contents = 'This is a fat file\n'
-        with open('a.fat', 'w') as f:
-            f.write(contents)
-
-        git('add a.fat')
-        git(['commit', '-madded fatfile'])
-
-        self.assertTrue('f.fat' not in git('status'))
+        filename = 'small.sh'
+        with open(filename, 'w') as f:
+            f.write(contents * 9990)
+        # make sure they don't match our filter first
+        filename = 'b.notfat'
+        with open(filename, 'w') as f:
+            f.write(contents * 1024 * 1024)
+        filename = 'c d e.notfat'
+        with open(filename, 'w') as f:
+            f.write(contents * 2048 * 1024)
+        commit('oops, added files not matching .gitattributes')
+        out = git('fat find 10000')
+        self.assertTrue('b.notfat' in out)
+        self.assertTrue('c d e.notfat' in out)
+        self.assertTrue('small.sh' not in out)
 
 
-if __name__ == '__main__':
-
-    path = os.environ["PATH"]
-
-    # Use our coverage python executable
-    test_dir = os.path.dirname(os.path.realpath(__file__))
-
-    # Use development version of git-fat
-    os.environ["PATH"] = ':'.join([test_dir] + path.split(':'))
-
-    print os.environ["PATH"]
-
+if __name__ == "__main__":
+    logging.basicConfig(format='%(levelname)s:%(filename)s:%(message)s', level=logging.DEBUG)
     unittest.main()
-
-    os.environ["PATH"] = path

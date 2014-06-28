@@ -20,7 +20,7 @@ Features
    included
 -  Binary files really exist in your working directory and are not
    soft-links
--  Only depends on Python 2.7, rsync and ssh
+-  Only depends on Python 2.7 and a backend
 -  Download only the files you need with pattern matching
 -  Supports anonymous downloads of files over http
 
@@ -247,12 +247,16 @@ Related projects
    approach to ``git-fat``, but with a different synchronization
    philosophy and with many Ruby dependencies.
 
+Development
+-----------
+
+To run the tests, install the test requirements with ``pip install -r tests/test_requirements.txt``
+
 Improvements
 ------------
 
--  More friendly configuration for multiple fat remotes
--  Private setting of a different remote. (e.g. local mirrors)
--  Generic backend interface
+-  config file location argument (global)
+-  backend cli option for push and pull (http, rsync, etc)
 -  Better Documentation
 -  Improved Testing
 
