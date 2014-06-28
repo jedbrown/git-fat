@@ -7,9 +7,9 @@ Introduction
 ------------
 
 Checking large binary files into a distributed version control system is
-a bad idea because repository size quickly becomes unmanagable. Every
-operation takes longer to complete and fresh clones become something
-that you do start doing overnight.
+a bad idea because repository size quickly becomes unmanagable. Numerous
+operations take longer to complete and fresh clones become something
+that you start and wait for a bit before coming back to them.
 Using ``git-fat`` allows you to separate the storage of largefiles from
 the source while still having them in the working directory for your project.
 
@@ -21,7 +21,6 @@ Features
 -  Binary files really exist in your working directory and are not
    soft-links
 -  Only depends on Python 2.7 and a backend
--  Download only the files you need with pattern matching
 -  Supports anonymous downloads of files over http
 
 Installation
@@ -250,13 +249,21 @@ Related projects
 Development
 -----------
 
-To run the tests, install the test requirements with ``pip install -r tests/test_requirements.txt``
+To run the tests, simply run ``python setup.py test``.
+
+To use the development version of ``git-fat`` for manual testing, run
+``pip install -U .`` (suggest doing that in a virtualenv).
+
+Master branch is a stable branch with the latest release at the HEAD.
+
 
 Improvements
 ------------
 
--  config file location argument (global)
--  backend cli option for push and pull (http, rsync, etc)
--  Better Documentation
+-  Better Documentation (esp. setting up a server)
 -  Improved Testing
-
+-  config file location argument (global)
+-  cli option to specify which backend to use for push and pull (http, rsync, etc)
+-  Python 3 compatability (without six)
+-  Really implement pattern matching
+-  Git hooks
