@@ -247,6 +247,11 @@ Related projects
    approach to ``git-fat``, but with a different synchronization
    philosophy and with many Ruby dependencies.
 
+Development
+-----------
+
+To run the tests, install the test requirements with ``pip install -r tests/test_requirements.txt``
+
 Improvements
 ------------
 

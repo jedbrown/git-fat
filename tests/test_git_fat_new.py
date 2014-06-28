@@ -191,9 +191,6 @@ class GeneralTestCase(InitRepoTestCase):
         commit("add fatfiles")
 
     def test_status(self):
-        # all there
-        # orphans
-        # stale
         out = git('fat status')
         self.assertEqual(out, '')
         objhash = read_index('b.fat').split()[2]
@@ -215,25 +212,40 @@ class GeneralTestCase(InitRepoTestCase):
         commit('remove file')
 
         os.rename(os.path.join(self.tempdir, objhash), path)
-
         # get the hash
         out = git('fat status')
         self.assertTrue('Stale' in out)
         self.assertTrue(objhash in out)
 
     def test_list(self):
-        pass
+        files = ('a.fat', 'b.fat', 'c d e.fat')
+        hashes = {f: read_index(f).split()[2] for f in files}
+
+        out = git('fat list')
+        lines = out.split('\n')[:-1] # ignore trailing newline
+        for line in lines:
+            objhash, filename = line.split(' ', 1)
+            self.assertEqual(hashes[filename], objhash)
 
     def test_find(self):
-        pass
+        contents = 'b'
 
-    def test_checkout(self):
-        # not sure how to test this
-        pass
+        filename = 'small.sh'
+        with open(filename, 'w') as f:
+            f.write(contents*9990)
+        # make sure they don't match our filter first
+        filename = 'b.notfat'
+        with open(filename, 'w') as f:
+            f.write(contents*1024*1024)
+        filename = 'c d e.notfat'
+        with open(filename, 'w') as f:
+            f.write(contents*2048*1024)
+        commit('oops, added files not matching .gitattributes')
+        out = git('fat find 10000')
+        self.assertTrue('b.notfat' in out)
+        self.assertTrue('c d e.notfat' in out)
+        self.assertTrue('small.sh' not in out)
 
-
-# TODO: status, list, find, checkout, full-history
-# TODO: pluggable Backend test
 
 if __name__ == "__main__":
     unittest.main()

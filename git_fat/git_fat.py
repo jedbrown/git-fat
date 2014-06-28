@@ -884,8 +884,9 @@ def main():
     sp = subparser.add_parser('list', help='list all files managed by git-fat')
     sp.set_defaults(func='list_files')
 
+    # Legacy function to preserve backwards compatability
     sp = subparser.add_parser('pull-http', help='anonymously download git-fat files over http')
-    sp.set_defaults(func='http_pull')
+    sp.set_defaults(func='pull', backend='http')
 
     sp = subparser.add_parser('index-filter', help='git fat index-filter for filter-branch')
     sp.add_argument('filelist', help='file containing all files to import to git-fat')
@@ -906,7 +907,7 @@ def main():
     kwargs = dict(vars(args))
 
     try:
-        backend = _parse_config()
+        backend = _parse_config(kwargs.pop('backend', None))
         run(backend, **kwargs)
     except RuntimeError as err:
         logging.error(str(err))
