@@ -850,8 +850,9 @@ def main():
     parser.add_argument('-a', "--full-history", dest='full_history', action='store_true',
         help='Look for git-fat placeholder files in the entire history instead of just the working copy')
 
-    # Empty function for legacy api; config gets called every time
+    # redundant function for legacy api; config gets called every time.
     # (assuming if user is calling git-fat they want it configured)
+    # plus people like running init when setting things up d(^_^)b
     sp = subparser.add_parser('init', help='Initialize git-fat')
     sp.set_defaults(func="configure")
 
@@ -893,6 +894,7 @@ def main():
     sp.set_defaults(func='index_filter')
 
     try:
+        # Being lazy by not using argparse
         if sys.argv[1] in [c + 'version' for c in '', '-', '--']:
             print(__version__)
             sys.exit(0)
@@ -902,9 +904,6 @@ def main():
 
     args = parser.parse_args()
     kwargs = dict(vars(args))
-
-#    if kwargs.get('func') == "init":
-#        sys.exit(0)
 
     try:
         backend = _parse_config()
