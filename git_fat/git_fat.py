@@ -47,8 +47,6 @@ BLOCK_SIZE = 4096
 
 NOT_IMPLEMENTED_MESSAGE = "This method isn't implemented for this backend!"
 
-logging.basicConfig(format='%(levelname)s:%(filename)s:%(message)s', level=logging.DEBUG)
-
 
 def git(cliargs, *args, **kwargs):
     ''' Calls git commands with Popen arguments '''
@@ -830,6 +828,11 @@ def _parse_config(backend=None, cfg_file_path=None):
     return Backend(base_dir, **opts)
 
 
+def _configure_logging(log_level):
+    log_format = '%(levelname)s:%(filename)s:%(message)s'
+    logging.basicConfig(format=log_format, level=log_level)
+
+
 def run(backend, **kwargs):
     name = kwargs.pop('func')
     full_history = kwargs.pop('full_history')
@@ -849,6 +852,10 @@ def main():
     # Global options
     parser.add_argument('-a', "--full-history", dest='full_history', action='store_true',
         help='Look for git-fat placeholder files in the entire history instead of just the working copy')
+    parser.add_argument('-v', "--verbose", dest='verbose', action='store_true',
+        help='Get verbose output about what git-fat is doing')
+    parser.add_argument('-d', "--debug", dest='debug', action='store_true',
+        help='Get debugging output about what git-fat is doing')
 
     # redundant function for legacy api; config gets called every time.
     # (assuming if user is calling git-fat they want it configured)
@@ -905,6 +912,14 @@ def main():
 
     args = parser.parse_args()
     kwargs = dict(vars(args))
+
+    if kwargs.pop('debug', None):
+        log_level = logging.DEBUG
+    elif kwargs.pop('verbose', None):
+        log_level = logging.INFO
+    else:
+        log_level = logging.WARNING
+    _configure_logging(log_level)
 
     try:
         backend = _parse_config(kwargs.pop('backend', None))

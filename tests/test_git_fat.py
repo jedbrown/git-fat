@@ -32,6 +32,7 @@ def git(cliargs, *args, **kwargs):
     cmd = ['git'] + cliargs
     return call(cmd)
 
+
 def commit(message):
     git('add -A')
     git(['commit', '-m', message])
@@ -178,13 +179,13 @@ class GeneralTestCase(InitRepoTestCase):
         filename = 'a.fat'
         contents = 'a'
         with open(filename, 'w') as f:
-            f.write(contents*1024)
+            f.write(contents * 1024)
         filename = 'b.fat'
         with open(filename, 'w') as f:
-            f.write(contents*1024*1024)
+            f.write(contents * 1024 * 1024)
         filename = 'c d e.fat'
         with open(filename, 'w') as f:
-            f.write(contents*2048*1024)
+            f.write(contents * 2048 * 1024)
         commit("add fatfiles")
 
     def test_status(self):
@@ -219,7 +220,7 @@ class GeneralTestCase(InitRepoTestCase):
         hashes = {f: read_index(f).split()[2] for f in files}
 
         out = git('fat list')
-        lines = out.split('\n')[:-1] # ignore trailing newline
+        lines = out.split('\n')[:-1]  # ignore trailing newline
         for line in lines:
             objhash, filename = line.split(' ', 1)
             self.assertEqual(hashes[filename], objhash)
@@ -229,14 +230,14 @@ class GeneralTestCase(InitRepoTestCase):
 
         filename = 'small.sh'
         with open(filename, 'w') as f:
-            f.write(contents*9990)
+            f.write(contents * 9990)
         # make sure they don't match our filter first
         filename = 'b.notfat'
         with open(filename, 'w') as f:
-            f.write(contents*1024*1024)
+            f.write(contents * 1024 * 1024)
         filename = 'c d e.notfat'
         with open(filename, 'w') as f:
-            f.write(contents*2048*1024)
+            f.write(contents * 2048 * 1024)
         commit('oops, added files not matching .gitattributes')
         out = git('fat find 10000')
         self.assertTrue('b.notfat' in out)
