@@ -856,6 +856,8 @@ def main():
         help='Get verbose output about what git-fat is doing')
     parser.add_argument('-d', "--debug", dest='debug', action='store_true',
         help='Get debugging output about what git-fat is doing')
+    parser.add_argument('-c', "--config", dest='config_file', type=str,
+        help='Specify which config file to use (defaults to .gitfat)')
 
     # redundant function for legacy api; config gets called every time.
     # (assuming if user is calling git-fat they want it configured)
@@ -872,10 +874,11 @@ def main():
     sp.set_defaults(func='filter_smudge')
 
     sp = subparser.add_parser('push', help='push cache to remote git-fat server')
+    sp.add_argument("backend", nargs="?", help='pull using given backend')
     sp.set_defaults(func='push')
 
     sp = subparser.add_parser('pull', help='pull fatfiles from remote git-fat server')
-    sp.add_argument("pattern", nargs="?", help='pull only files matching pattern')
+    sp.add_argument("backend", nargs="?", help='pull using given backend')
     sp.set_defaults(func='pull')
 
     sp = subparser.add_parser('checkout', help='resmudge all orphan objects')
@@ -922,7 +925,9 @@ def main():
     _configure_logging(log_level)
 
     try:
-        backend = _parse_config(kwargs.pop('backend', None))
+        backend_opt = kwargs.pop('backend', None)
+        config_file = kwargs.pop('config_file', None)
+        backend = _parse_config(backend=backend_opt, cfg_file_path=config_file)
         run(backend, **kwargs)
     except RuntimeError as err:
         logging.error(str(err))
