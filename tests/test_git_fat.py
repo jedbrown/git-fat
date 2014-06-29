@@ -4,6 +4,7 @@ import subprocess as sub
 import tempfile
 import unittest
 import logging
+import time
 
 
 logging.basicConfig(format='%(levelname)s:%(filename)s:%(message)s')
@@ -76,6 +77,9 @@ class Base(unittest.TestCase):
             f.write('*.fat filter=fat -crlf')
 
     def tearDown(self):
+        call('coverage combine')
+        os.rename(os.path.join(self.repo, '.coverage'),
+            os.path.join(self.olddir, '.coverage.{}'.format(time.time())))
         os.chdir(self.olddir)
         shutil.rmtree(self.tempdir)
         os.environ["PATH"] = self.oldpath
