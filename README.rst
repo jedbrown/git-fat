@@ -90,18 +90,19 @@ they try to pull fat-files.
     git fat push
 
 After we've done a new clone of a repository using ``git-fat``, to get
-the additional files we do a fat pull.
+the additional files we do a fat pull.  This will pull the default backend
+as determined by the first entry in the ``.gitfat`` file for the repo.
 
 ::
 
     git fat pull
 
-Or if you're doing an anonymous pull, and the repository managers
-support it.
+To specify which backend to use when pulling or pushing files, then simply
+list the backend type after the pull or push command.
 
 ::
 
-    git fat pull-http
+    git fat pull http
 
 To list the files managed by ``git-fat``
 

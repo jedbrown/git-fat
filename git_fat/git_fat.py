@@ -12,6 +12,7 @@ import warnings
 import ConfigParser as cfgparser
 import logging
 import shutil
+import argparse
 
 try:
     from subprocess import check_output
@@ -843,10 +844,9 @@ def run(backend, **kwargs):
 
 
 def main():
-    import argparse
 
-    parser = argparse.ArgumentParser(usage="%(prog)s [global options] command [command options]\n"
-        "       %(prog)s -h for full usage.", argument_default=argparse.SUPPRESS)  # Six spaces for len('usage: ')
+    parser = argparse.ArgumentParser(argument_default=argparse.SUPPRESS,
+        description='A tool for managing large binary files in git repositories.')
     subparser = parser.add_subparsers()
 
     # Global options
@@ -865,11 +865,11 @@ def main():
     sp = subparser.add_parser('init', help='Initialize git-fat')
     sp.set_defaults(func="configure")
 
-    sp = subparser.add_parser('filter-clean', help='filter-clean to be called only by git')
+    sp = subparser.add_parser('filter-clean', help="Internal function used by git")
     sp.add_argument("cur_file", nargs="?")
     sp.set_defaults(func='filter_clean')
 
-    sp = subparser.add_parser('filter-smudge', help='filter-smudge to be called only by git')
+    sp = subparser.add_parser('filter-smudge', help="Internal function used by git")
     sp.add_argument("cur_file", nargs="?")
     sp.set_defaults(func='filter_smudge')
 
@@ -895,7 +895,7 @@ def main():
     sp.set_defaults(func='list_files')
 
     # Legacy function to preserve backwards compatability
-    sp = subparser.add_parser('pull-http', help='anonymously download git-fat files over http')
+    sp = subparser.add_parser('pull-http', help="Deprecated, use `pull http` (no dash) instead")
     sp.set_defaults(func='pull', backend='http')
 
     sp = subparser.add_parser('index-filter', help='git fat index-filter for filter-branch')
