@@ -317,6 +317,10 @@ class GitFat(object):
                 objhash, objtype, size = line.split()
                 if objtype == 'blob' and int(size) in self.magiclens:
                     output.write(objhash + '\n')
+                else:
+                    # Ignore filename(s) for git hashes that are not git-fat objects
+                    if with_filenames and objhash in githash_to_filenames:
+                        del githash_to_filenames[objhash]
             output.close()
         # ...`cat-file --batch` provides full contents of git-fat candidates in bulk
         p3 = subprocess.Popen(['git','cat-file','--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
