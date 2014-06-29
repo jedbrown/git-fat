@@ -845,12 +845,12 @@ def run(backend, **kwargs):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(usage=("%(prog)s [global options] command [command options]\n"
-        "       %(prog)s -h for full usage."))  # Six spaces for len('usage: ')
+    parser = argparse.ArgumentParser(usage="%(prog)s [global options] command [command options]\n"
+        "       %(prog)s -h for full usage.", argument_default=argparse.SUPPRESS)  # Six spaces for len('usage: ')
     subparser = parser.add_subparsers()
 
     # Global options
-    parser.add_argument('-a', "--full-history", dest='full_history', action='store_true',
+    parser.add_argument('-a', "--full-history", dest='full_history', action='store_true', default=False,
         help='Look for git-fat placeholder files in the entire history instead of just the working copy')
     parser.add_argument('-v', "--verbose", dest='verbose', action='store_true',
         help='Get verbose output about what git-fat is doing')
