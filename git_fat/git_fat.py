@@ -42,7 +42,7 @@ except ImportError:
 
     sub.check_output = backport_check_output
 
-__version__ = '0.2.4'
+__version__ = '0.3.0'
 
 BLOCK_SIZE = 4096
 

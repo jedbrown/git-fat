@@ -45,3 +45,22 @@ IMPROVEMENTS
 BUGFIXES
 
 - python 2.6 format string compatability
+
+0.3.0
+-----
+
+IMPROVEMENTS
+
+- Much better testing infrastructure.  It's no longer a pain to add tests!
+
+FEATURES
+
+- Generic backend interface.  You can now specify which backend you want to use
+  when pulling by doing `git fat pull {backend}`
+- Added local copy backend
+- Added Command line option `-c` to specify config file to use
+
+BUGFIXES
+
+- Fixed stacktrace caused by a regression when adding the version option.
+  Thanks @madssj
