@@ -64,3 +64,10 @@ BUGFIXES
 
 - Fixed stacktrace caused by a regression when adding the version option.
   Thanks @madssj
+
+0.3.1
+-----
+
+BUGFIXES
+
+- Regression with git fat status would exit non-zero.
