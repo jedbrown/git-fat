@@ -798,7 +798,10 @@ def _get_options(config, backend, cfg_file_path):
 def _read_config(cfg_file_path=None):
     config = cfgparser.SafeConfigParser()
     if not os.path.exists(cfg_file_path):
-        raise RuntimeError("Configfile does not exist: {}".format(cfg_file_path))
+        # Can't continue, but this isn't unusual
+        logging.warning("This does not appear to be a repository managed by git-fat.\n"
+                        "Missing configfile at: {}".format(cfg_file_path))
+        sys.exit(0)
     try:
         config.read(cfg_file_path)
     except cfgparser.Error:  # TODO: figure out what to catch here

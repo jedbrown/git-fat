@@ -31,7 +31,7 @@ def git(cliargs, *args, **kwargs):
     if isinstance(cliargs, str):
         cliargs = cliargs.split()
     cmd = ['git'] + cliargs
-    return call(cmd)
+    return call(cmd, *args, **kwargs)
 
 
 def commit(message):
@@ -100,6 +100,11 @@ class InitTestCase(Base):
 
         out = git('config filter.fat.smudge')
         self.assertEqual(out.strip(), 'git-fat filter-smudge %f')
+
+    def test_git_fat_noconfig(self):
+        out = git('fat status', stderr=sub.STDOUT)
+        self.assertTrue("Missing config" in out)
+        self.assertTrue("does not appear" in out)
 
     def test_existing_files_pattern_match(self):
         """ Don't convert existing files into git-fat files unless they get renamed """
