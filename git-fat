@@ -326,16 +326,23 @@ class GitFat(object):
             # is small enough to read into memory and process
             content = ''
             while bytes_read < size:
-                content += p3.stdout.read(size - bytes_read)
-                bytes_read = len(content)
+                data = p3.stdout.read(size - bytes_read)
+                if not data:
+                    break  # EOF
+                content += data
+                bytes_read += len(data)
             try:
                 fathash = self.decode(content)[0]
                 referenced.add(fathash)
             except GitFat.DecodeError:
                 pass
             # Consume LF record delimiter in `cat-file --batch` output
-            while not p3.stdout.read(1):
-                pass
+            bytes_read = 0
+            while bytes_read < 1:
+                data = p3.stdout.read(1)
+                if not data:
+                    break  # EOF
+                bytes_read += len(data)
         # Ensure everything is cleaned up
         cut_thread.join()
         filter_thread.join()
