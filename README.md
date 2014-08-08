@@ -4,7 +4,7 @@ Even if the instantaneous working tree stays manageable, preserving repository i
 Some people recommend checking binaries into different repositories or even not versioning them at all, but these are not satisfying solutions for most workflows.
 
 ## Features of `git-fat`
-* clones of the source repository are small and fast because no binaries are transferred, yet fully functional (unlike `git clone --depth`)
+* clones of the source repository are small and fast because no binaries are transferred, yet fully functional with complete metadata and incremental retrieval (`git clone --depth` has limited granularity and couples metadata to content)
 * `git-fat` supports the same workflow for large binaries and traditionally versioned files, but internally manages the "fat" files separately
 * `git-bisect` works properly even when versions of the binary files change over time
 * selective control of which large files to pull into the local store
