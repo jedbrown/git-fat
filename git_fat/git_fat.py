@@ -171,8 +171,8 @@ class BackendInterface(object):
         raise NotImplementedError(NOT_IMPLEMENTED_MESSAGE)
 
     def push_files(self, file_list):
-        """ Return True if push was successful, False otherwise """
-        pass
+        """ Return True if push was successful, False otherwise. Not required but useful """
+        raise NotImplementedError(NOT_IMPLEMENTED_MESSAGE)
 
     def pull_files(self, file_list):
         """ Return True if pull was successful, False otherwise """
