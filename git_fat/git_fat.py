@@ -42,7 +42,7 @@ except ImportError:
 
     sub.check_output = backport_check_output
 
-__version__ = '0.3.0'
+__version__ = '0.3.1'
 
 BLOCK_SIZE = 4096
 
@@ -171,8 +171,8 @@ class BackendInterface(object):
         raise NotImplementedError(NOT_IMPLEMENTED_MESSAGE)
 
     def push_files(self, file_list):
-        """ Return True if push was successful, False otherwise """
-        pass
+        """ Return True if push was successful, False otherwise. Not required but useful """
+        raise NotImplementedError(NOT_IMPLEMENTED_MESSAGE)
 
     def pull_files(self, file_list):
         """ Return True if pull was successful, False otherwise """
