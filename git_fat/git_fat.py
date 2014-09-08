@@ -284,7 +284,12 @@ class RSyncBackend(BackendInterface):
 
     def pull_files(self, file_list):
         rsync = self._rsync(push=False)
-        p = sub.Popen(rsync, stdin=sub.PIPE)
+        try:
+            p = sub.Popen(rsync, stdin=sub.PIPE)
+        except OSError:
+            ## re-raise with a more useful message
+            raise OSError('Error running "%s"' % " ".join(rsync))
+
         p.communicate(input='\x00'.join(file_list))
         # TODO: fix for success check
         return True
