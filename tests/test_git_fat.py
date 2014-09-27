@@ -86,6 +86,7 @@ class Base(unittest.TestCase):
 
 
 class InitTestCase(Base):
+    """ Test cases which have not had git-fat initalized yet """
 
     def test_git_fat_init(self):
         with open('.gitfat', 'w') as f:
@@ -101,10 +102,19 @@ class InitTestCase(Base):
         out = git('config filter.fat.smudge')
         self.assertEqual(out.strip(), 'git-fat filter-smudge %f')
 
-    def test_git_fat_noconfig(self):
-        out = git('fat status', stderr=sub.STDOUT)
+    def test_git_fat_no_dotgitfat(self):
+        out = git('fat push', stderr=sub.STDOUT)
         self.assertTrue("Missing config" in out)
         self.assertTrue("does not appear" in out)
+
+    def test_command_not_push(self):
+        """ Test that find works without a backend """
+        filename = 'somebin.png'
+        with open(filename, 'w') as f:
+            f.write('aa' * 9990)
+        commit('add file')
+        out = git('fat find 9000', stderr=sub.STDOUT)
+        self.assertTrue('somebin.png' in out)
 
     def test_existing_files_pattern_match(self):
         """ Don't convert existing files into git-fat files unless they get renamed """
