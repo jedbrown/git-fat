@@ -263,6 +263,33 @@ class GeneralTestCase(InitRepoTestCase):
         self.assertTrue('c d e.notfat' in out)
         self.assertTrue('small.sh' not in out)
 
+    def test_index_filter(self):
+
+        flowerpot = 'flowerpot.tar.gz'
+        with open(flowerpot, 'w') as f:
+            f.write('a' * 9990)
+        commit('add fake tar file')
+        whale = 'whale.tar.gz'
+        with open(whale, 'w') as f:
+            f.write('a' * 10000)
+        commit('add another fake tar file')
+        out = git('fat find 9000')
+        self.assertTrue(whale in out)
+        self.assertTrue(flowerpot in out)
+
+        f, filename = tempfile.mkstemp()
+        with open(filename, 'w') as f:
+            f.write(flowerpot + "\n")
+            f.write(whale + "\n")
+
+        git(['filter-branch', '--index-filter', 'git fat index-filter {}'.format(filename),
+             '--tag-name-filter', 'cat', '--', '--all'])
+
+        self.assertTrue('#$# git-fat' in read_index(flowerpot))
+        self.assertTrue('#$# git-fat' in read_index(whale))
+        self.assertTrue(flowerpot in read_index('.gitattributes'))
+        self.assertTrue(flowerpot in read_index('.gitattributes'))
+
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(levelname)s:%(filename)s:%(message)s', level=logging.DEBUG)
