@@ -624,10 +624,9 @@ class GitFat(object):
         # Add lines to the .gitattributes file
         new_ga = old_ga + ['{0} filter=fat -text'.format(f) for f in newfiles]
         stdout, _ = ga_hashobj.communicate('\n'.join(new_ga) + '\n')
-        self._update_index(ga_mode, stdout.strip(), ga_stno, '.gitattributes')
         return ga_mode, stdout.strip(), ga_stno, '.gitattributes'
 
-    def _process_index_filter_line(self, line, update_index, workdir, excludes):
+    def _process_index_filter_line(self, line, workdir, excludes):
 
         mode, blobhash, stageno, filename = self._parse_ls_files(line)
 
@@ -652,8 +651,8 @@ class GitFat(object):
         return mode, objhash, stageno, filename
 
     def index_filter(self, filelist, add_gitattributes=True, **kwargs):
-
-        workdir = os.path.join(self.gitdir, 'fat', 'index-filter')
+        gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
+        workdir = os.path.join(gitdir, 'fat', 'index-filter')
         mkdir_p(workdir)
 
         with open(filelist) as excludes:
@@ -664,17 +663,16 @@ class GitFat(object):
 
         newfiles = []
         for line in ls_files.stdout:
-            newfile = self._process_index_filter_line(line)
+            newfile = self._process_index_filter_line(line, workdir, files_to_exclude)
             if newfile:
                 self._update_index(uip, *newfile)
                 # The filename is in the last position
                 newfiles.append(newfile[-1])
 
-        newfiles = self._filter_clean_index(ls_files.stdout, files_to_exclude)
-
         if add_gitattributes:
             # Add the files to the gitattributes file and update the index
-            self._update_index(uip, *self._add_gitattributes(newfiles))
+            attrs = self._add_gitattributes(newfiles, add_gitattributes)
+            self._update_index(uip, *attrs)
 
         ls_files.wait()
         uip.stdin.close()
