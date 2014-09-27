@@ -287,7 +287,7 @@ class RSyncBackend(BackendInterface):
         try:
             p = sub.Popen(rsync, stdin=sub.PIPE)
         except OSError:
-            ## re-raise with a more useful message
+            # re-raise with a more useful message
             raise OSError('Error running "%s"' % " ".join(rsync))
 
         p.communicate(input='\x00'.join(file_list))
@@ -912,14 +912,9 @@ def main():
         help='prevent adding excluded to .gitattributes', action='store_false')
     sp.set_defaults(func='index_filter')
 
-    try:
-        # Being lazy by not using argparse
-        if sys.argv[1] in [c + 'version' for c in '', '-', '--']:
-            print(__version__)
-            sys.exit(0)
-    except IndexError:
-        parser.print_help()
-        sys.exit(1)
+    if len(sys.argv) > 0 and sys.argv[1] in [c + 'version' for c in '', '-', '--']:
+        print(__version__)
+        sys.exit(0)
 
     args = parser.parse_args()
     kwargs = dict(vars(args))
@@ -932,10 +927,14 @@ def main():
         log_level = logging.WARNING
     _configure_logging(log_level)
 
+    require_backend = ('pull', 'push')
+
     try:
         backend_opt = kwargs.pop('backend', None)
         config_file = kwargs.pop('config_file', None)
-        backend = _parse_config(backend=backend_opt, cfg_file_path=config_file)
+        backend = None
+        if kwargs['func'] in require_backend:
+            backend = _parse_config(backend=backend_opt, cfg_file_path=config_file)
         run(backend, **kwargs)
     except RuntimeError as err:
         logging.error(str(err))
