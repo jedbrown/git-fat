@@ -10,17 +10,17 @@ Git-fat is a tool written by `jedbrown <https://github.com/jedbrown/git-fat>`_.
 This repository / pypi package is a fork which we are
 `actively trying to resolve <https://github.com/jedbrown/git-fat/pull/19>`_.
 With that said, the repository placeholder format is compatible with both, so
-they should be interchangable for now.  Please take care to check which one
+they should be interchangeable for now.  Please take care to check which one
 you are using before opening issues on either repository, and include as much
 information as possible so that we are able to help you as best we can.
 
-Now an explination about what (either) ``git-fat`` does:
+Now an explanation about what (either) ``git-fat`` does:
 
 Checking large binary files into a distributed version control system is
-a bad idea because repository size quickly becomes unmanagable. Numerous
+a bad idea because repository size quickly becomes unmanageable. Numerous
 operations take longer to complete and fresh clones become something
 that you start and wait for a bit before coming back to them.
-Using ``git-fat`` allows you to separate the storage of largefiles from
+Using ``git-fat`` allows you to separate the storage of large-files from
 the source while still having them in the working directory for your project.
 
 Features
@@ -81,7 +81,7 @@ optionally include an http remote for anonymous clones.
 
 Commit those files so that others will be able to use them.
 
-Initalize the repository. This adds a line to ``.git/config`` telling
+Initialize the repository. This adds a line to ``.git/config`` telling
 git what command to run for the ``fat`` filter is in the
 ``.gitattributes`` file.
 
@@ -91,7 +91,7 @@ git what command to run for the ``fat`` filter is in the
 
 Now when you add a file that matches a pattern in the ``.gitattributes``
 file, it will be converted to a fat placeholder file before getting
-commited to the repository. After you've added a file **remember to push
+committed to the repository. After you've added a file **remember to push
 it to the fat store**, otherwise people won't get the binary file when
 they try to pull fat-files.
 
@@ -182,7 +182,7 @@ First, clone the repository and find all the large files with the
 
 
 Review the files and make sure that they're what you want to exclude from the
-repository.  If the list looks good, put the filenames into another file that
+repository.  If the list looks good, put the file names into another file that
 will be read from during ``filter-branch``.
 
 ::
@@ -205,7 +205,7 @@ will be read from during ``filter-branch``.
     -rw-r--r-- 1 darthurdent darthurdent  10M Dec 10 13:37 whale.tar.gz
 
 Do the ``filter-branch`` using ``git fat index-filter`` as the index filter.
-Pass in the filename containing the paths to files you want to exclude.
+Pass in the file name containing the paths to files you want to exclude.
 
 ::
 
@@ -275,6 +275,6 @@ Improvements
 -  Improved Testing
 -  config file location argument (global)
 -  cli option to specify which backend to use for push and pull (http, rsync, etc)
--  Python 3 compatability (without six)
+-  Python 3 compatibility (without six)
 -  Really implement pattern matching
 -  Git hooks
