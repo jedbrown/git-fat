@@ -6,6 +6,16 @@ A tool for managing large binary files in git repositories.
 Introduction
 ------------
 
+Git-fat is a tool written by `jedbrown <https://github.com/jedbrown/git-fat>`_.
+This repository / pypi package is a fork which we are
+`actively trying to resolve <https://github.com/jedbrown/git-fat/pull/19>`_.
+With that said, the repository placeholder format is compatible with both, so
+they should be interchangable for now.  Please take care to check which one
+you are using before opening issues on either repository, and include as much
+information as possible so that we are able to help you as best we can.
+
+Now an explination about what (either) ``git-fat`` does:
+
 Checking large binary files into a distributed version control system is
 a bad idea because repository size quickly becomes unmanagable. Numerous
 operations take longer to complete and fresh clones become something
