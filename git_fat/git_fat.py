@@ -284,7 +284,12 @@ class RSyncBackend(BackendInterface):
 
     def pull_files(self, file_list):
         rsync = self._rsync(push=False)
-        p = sub.Popen(rsync, stdin=sub.PIPE)
+        try:
+            p = sub.Popen(rsync, stdin=sub.PIPE)
+        except OSError:
+            # re-raise with a more useful message
+            raise OSError('Error running "%s"' % " ".join(rsync))
+
         p.communicate(input='\x00'.join(file_list))
         # TODO: fix for success check
         return True
@@ -619,10 +624,9 @@ class GitFat(object):
         # Add lines to the .gitattributes file
         new_ga = old_ga + ['{0} filter=fat -text'.format(f) for f in newfiles]
         stdout, _ = ga_hashobj.communicate('\n'.join(new_ga) + '\n')
-        self._update_index(ga_mode, stdout.strip(), ga_stno, '.gitattributes')
         return ga_mode, stdout.strip(), ga_stno, '.gitattributes'
 
-    def _process_index_filter_line(self, line, update_index, workdir, excludes):
+    def _process_index_filter_line(self, line, workdir, excludes):
 
         mode, blobhash, stageno, filename = self._parse_ls_files(line)
 
@@ -647,8 +651,8 @@ class GitFat(object):
         return mode, objhash, stageno, filename
 
     def index_filter(self, filelist, add_gitattributes=True, **kwargs):
-
-        workdir = os.path.join(self.gitdir, 'fat', 'index-filter')
+        gitdir = sub.check_output('git rev-parse --git-dir'.split()).strip()
+        workdir = os.path.join(gitdir, 'fat', 'index-filter')
         mkdir_p(workdir)
 
         with open(filelist) as excludes:
@@ -659,17 +663,16 @@ class GitFat(object):
 
         newfiles = []
         for line in ls_files.stdout:
-            newfile = self._process_index_filter_line(line)
+            newfile = self._process_index_filter_line(line, workdir, files_to_exclude)
             if newfile:
                 self._update_index(uip, *newfile)
                 # The filename is in the last position
                 newfiles.append(newfile[-1])
 
-        newfiles = self._filter_clean_index(ls_files.stdout, files_to_exclude)
-
         if add_gitattributes:
             # Add the files to the gitattributes file and update the index
-            self._update_index(uip, *self._add_gitattributes(newfiles))
+            attrs = self._add_gitattributes(newfiles, add_gitattributes)
+            self._update_index(uip, *attrs)
 
         ls_files.wait()
         uip.stdin.close()
@@ -907,14 +910,9 @@ def main():
         help='prevent adding excluded to .gitattributes', action='store_false')
     sp.set_defaults(func='index_filter')
 
-    try:
-        # Being lazy by not using argparse
-        if sys.argv[1] in [c + 'version' for c in '', '-', '--']:
-            print(__version__)
-            sys.exit(0)
-    except IndexError:
-        parser.print_help()
-        sys.exit(1)
+    if len(sys.argv) > 0 and sys.argv[1] in [c + 'version' for c in '', '-', '--']:
+        print(__version__)
+        sys.exit(0)
 
     args = parser.parse_args()
     kwargs = dict(vars(args))
@@ -927,10 +925,14 @@ def main():
         log_level = logging.WARNING
     _configure_logging(log_level)
 
+    require_backend = ('pull', 'push')
+
     try:
         backend_opt = kwargs.pop('backend', None)
         config_file = kwargs.pop('config_file', None)
-        backend = _parse_config(backend=backend_opt, cfg_file_path=config_file)
+        backend = None
+        if kwargs['func'] in require_backend:
+            backend = _parse_config(backend=backend_opt, cfg_file_path=config_file)
         run(backend, **kwargs)
     except RuntimeError as err:
         logging.error(str(err))
