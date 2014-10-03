@@ -78,3 +78,12 @@ BUGFIXES
 BUGFIXES
 
 - Fixed silent failure when using http and trying to push to a remote
+
+0.3.3
+-----
+
+BUGFIXES
+
+- Improved rsync error message.
+- Fix retroactive import (index-filter)
+- Only fail on some commands if .gitfat isn't present
