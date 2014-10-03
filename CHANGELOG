@@ -87,3 +87,10 @@ BUGFIXES
 - Improved rsync error message.
 - Fix retroactive import (index-filter)
 - Only fail on some commands if .gitfat isn't present
+
+0.3.4
+-----
+
+INFO
+
+- Added note about fork status
