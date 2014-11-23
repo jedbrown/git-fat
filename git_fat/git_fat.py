@@ -242,7 +242,7 @@ class HTTPBackend(BackendInterface):
             objfile = os.path.join(self.base_dir, digest)
             os.chmod(tmpname, int('444', 8) & ~umask())
             # Rename temp file
-            os.rename(tmpname, objfile)
+            shutil.move(tmpname, objfile)
 
         return is_success
 
@@ -547,7 +547,7 @@ class GitFat(object):
             # Set permissions for the new file using the current umask
             os.chmod(tmpname, int('444', 8) & ~umask())
             # Rename temp file
-            os.rename(tmpname, objfile)
+            shutil.move(tmpname, objfile)
             logging.info('git-fat filter-clean: caching to {}'.format(objfile))
 
         # Write placeholder to index

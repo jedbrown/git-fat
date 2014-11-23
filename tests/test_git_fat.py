@@ -78,7 +78,7 @@ class Base(unittest.TestCase):
 
     def tearDown(self):
         call('coverage combine')
-        os.rename(os.path.join(self.repo, '.coverage'),
+        shutil.move(os.path.join(self.repo, '.coverage'),
             os.path.join(self.olddir, '.coverage.{}'.format(time.time())))
         os.chdir(self.olddir)
         shutil.rmtree(self.tempdir)
@@ -152,7 +152,7 @@ class InitTestCase(Base):
         self.assertEqual(expect + append_me, actual)
 
         # finally, rename the file
-        os.rename('a.fat', 'b.fat')
+        shutil.move('a.fat', 'b.fat')
         commit('a.fat->b.fat')
         actual = read_index('b.fat')
         expect = '#$# git-fat ebf646b3730c9f5ec2625081eb488c55000f622e                   21\n'
@@ -212,7 +212,7 @@ class GeneralTestCase(InitRepoTestCase):
         self.assertEqual(out, '')
         objhash = read_index('b.fat').split()[2]
         path = os.path.join(os.getcwd(), '.git/fat/objects', objhash)
-        os.rename(path, os.path.join(self.tempdir, objhash))
+        shutil.move(path, os.path.join(self.tempdir, objhash))
         os.remove('b.fat')
 
         # Need to checkout the file again so that it can be re-smudged
@@ -228,7 +228,7 @@ class GeneralTestCase(InitRepoTestCase):
         # commit this time
         commit('remove file')
 
-        os.rename(os.path.join(self.tempdir, objhash), path)
+        shutil.move(os.path.join(self.tempdir, objhash), path)
         # get the hash
         out = git('fat status')
         self.assertTrue('Stale' in out)
