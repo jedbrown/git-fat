@@ -2,6 +2,8 @@
 # Any copyright is dedicated to the Public Domain.
 # http://creativecommons.org/publicdomain/zero/1.0/
 
+export GIT_FAT_VERBOSE=1
+
 # Clear out repos and fat store from prior test runs
 rm -fR fat-test fat-test2 /tmp/fat-store
 

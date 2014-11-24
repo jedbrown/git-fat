@@ -1,7 +1,9 @@
 #!/bin/sh -ex
 
+export GIT_FAT_VERBOSE=1
 fullpath() { echo "`pwd`/$1"; }
 
+rm -rf retro retro-clone retro-store
 git init retro
 cd retro
 cp /usr/share/dict/words words.big
@@ -50,4 +52,4 @@ cd ..
 git clone file:///$(fullpath retro) retro-clone
 cd retro-clone
 git fat init
-git fat pull
+git pull
