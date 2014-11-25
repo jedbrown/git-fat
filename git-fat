@@ -465,8 +465,8 @@ class GitFat(object):
         if p.returncode:
             sys.exit(p.returncode)
         self.convert_digest_to_symlink(files, share)
-    def git_remote_exists(self):
-        args = ['git', 'remote']
+    def git_upstream_exists(self):
+        args = ['git', 'name-rev', '@{upstream}']
         p = subprocess.Popen(args, stdout=subprocess.PIPE)
         output = p.communicate()[0].strip()
         if p.returncode or not output:
@@ -474,7 +474,7 @@ class GitFat(object):
         else:
             return True
     def cmd_pre_push(self, args):
-        if self.git_remote_exists():
+        if self.git_upstream_exists():
             self.cmd_push("")
     def cmd_push(self, args):
         'Push all fat files that I have stored and referenced'
@@ -517,10 +517,10 @@ class GitFat(object):
         if p.returncode:
             sys.exit(p.returncode)
     def cmd_post_merge(self, args):
-        if self.git_remote_exists():
+        if self.git_upstream_exists():
             self.cmd_pull("")
     def cmd_pre_rebase(self, args):
-        if self.git_remote_exists():
+        if self.git_upstream_exists():
             self.cmd_pull("")
     def cmd_pull(self, args):
         'Pull anything that I have referenced, but not stored'
