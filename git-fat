@@ -467,12 +467,13 @@ class GitFat(object):
         self.convert_digest_to_symlink(files, share)
     def git_upstream_exists(self):
         args = ['git', 'name-rev', '@{upstream}']
-        p = subprocess.Popen(args, stdout=subprocess.PIPE)
-        output = p.communicate()[0].strip()
-        if p.returncode or not output:
-            return False
-        else:
-            return True
+        with open(os.devnull, 'w') as devnull:
+      	    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=devnull)
+            output = p.communicate()[0].strip()
+            if p.returncode or not output:
+                return False
+            else:
+                return True
     def cmd_pre_push(self, args):
         if self.git_upstream_exists():
             self.cmd_push("")
