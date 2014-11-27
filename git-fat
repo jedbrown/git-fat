@@ -17,10 +17,6 @@ import threading
 import time
 import collections
 
-if not type(sys.version_info) is tuple and sys.version_info.major > 2:
-    sys.stderr.write('git-fat does not support Python-3 yet.  Please use python2.\n')
-    sys.exit(1)
-
 try:
     from subprocess import check_output
     del check_output
@@ -671,7 +667,7 @@ class GitFat(object):
         time1 = time.time()
         self.verbose('Found %d paths in %.3f s' % (len(pathsizes), time1-time0))
         maxlen = max(map(len,pathsizes)) if pathsizes else 0
-        for path, sizes in sorted(pathsizes.items(), key=lambda p,s: max(s), reverse=True):
+        for path, sizes in sorted(pathsizes.items(), cmp=lambda (p1,s1),(p2,s2): cmp(max(s1),max(s2)), reverse=True):
             print('%-*s filter=fat -text # %10d %d' % (maxlen, path,max(sizes),len(sizes)))
         revlist.wait()
         difftree.wait()
