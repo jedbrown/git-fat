@@ -202,6 +202,7 @@ class GitFat(object):
         objfile = os.path.join(self.objdir, digest)
         if os.path.lexists(objfile):
             os.remove(objfile)
+        mkdir_p(os.path.dirname(objfile))
         os.symlink(sharefile, objfile)                              # Note that sharefile may not exist, i.e. may be creating a broken symlink. It is OK as we may not have pulled from remote (to share) yet.
     def convert_digest_to_symlink(self, files, share):
         'Replace self.objdir/digest in files with links pointing at share/digest'
@@ -287,8 +288,7 @@ class GitFat(object):
             # Skip empty files
             if bytes != 0:
                 digest = h.hexdigest()
-                objfile = os.path.join(self.objdir, digest)
-                objfile += '.' + fname
+                objfile = os.path.join(self.objdir, fname + '.' + digest)
                 if not ishanging:
                     if os.path.exists(objfile):
                         self.verbose('git-fat filter-clean: cache already exists %s' % objfile)
@@ -296,6 +296,7 @@ class GitFat(object):
                     else:
                         # Set permissions for the new file using the current umask
                         os.chmod(tmpname, int('444', 8) & ~umask())
+                        mkdir_p(os.path.dirname(objfile))
                         os.rename(tmpname, objfile)
                         self.verbose('git-fat filter-clean: caching to %s' % objfile)
                     cached = True
@@ -316,7 +317,7 @@ class GitFat(object):
         self.setup()
         result, bytes = self.decode_stream(sys.stdin)
         if isinstance(result, str):       # We got a digest
-            result += '.' + fname;
+            result = fname + '.' + result;
             objfile = os.path.join(self.objdir, result)
             if not os.access(objfile, os.R_OK):
                 self.verbose('git-fat filter-smudge: fat object missing %s - will query share, if available, and try again' % objfile)
@@ -392,7 +393,7 @@ class GitFat(object):
                     data = queue.get()
                     list = str(data).split()
                     if objhash == list[0]:
-                        fathash += '.' + list[1]
+                        fathash = list[1] + '.' + fathash
                         break
                     if data is _sentinel:
                         queue.put(_sentinel)
@@ -417,7 +418,7 @@ class GitFat(object):
 
     def orphan_files(self, patterns=[]):
         'generator for all orphan placeholders in the working tree'
-        for fname in subprocess.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
+        for fname in subprocess.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00'):
             digest = self.decode_file(fname)[0]
             if digest:
                 yield (digest, fname)
@@ -501,7 +502,7 @@ class GitFat(object):
         'Update any stale files in the present working tree'
         self.assert_init_done()
         for digest, fname in self.orphan_files():
-            digest += '.' + fname;
+            digest = fname + '.' + digest;
             objpath = os.path.join(self.objdir, digest)
             if not os.access(objpath, os.R_OK):
                 self.symlink_to_share(digest)
