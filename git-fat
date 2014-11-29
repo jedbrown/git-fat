@@ -655,7 +655,7 @@ class GitFat(object):
         objcheck = subprocess.Popen(['git', 'cat-file', '--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=-1)
         hashonly = threading.Thread(target=hash_only, args=(revlist.stdout, objcheck.stdin))
         hashonly.start()
-        numblobs = 0; numlarge = 1
+        numblobs = 0; numlarge = 0
         # Build dict with the sizes of all large blobs
         for line in objcheck.stdout:
             objhash, blob, size = line.split()
@@ -672,8 +672,10 @@ class GitFat(object):
         time1 = time.time()
         self.verbose('%d of %d blobs are >= %d bytes [elapsed %.3fs]' % (numlarge, numblobs, threshsize, time1-time0))
     def cmd_find(self, args):
-        maxsize = int(args[0])
-        blobsizes = dict(self.gen_large_blobs('--all', maxsize))
+        minsize = 0
+        if len(args):
+            minsize = int(args[0])
+        blobsizes = dict(self.gen_large_blobs('--all', int(minsize)))
         time0 = time.time()
         # Find all names assumed by large blobs (those in blobsizes)
         pathsizes = collections.defaultdict(lambda:set())
