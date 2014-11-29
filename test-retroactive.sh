@@ -10,8 +10,9 @@ cp /usr/share/dict/words words.big
 chmod u+w words.big
 git add words.big
 git commit -m'Add big file without using git-fat'
-sort words.big > sorted.big
-git add sorted.big
+mkdir sub
+sort words.big > sub/sorted.big
+git add sub/sorted.big
 git commit -m'Add sorted file without using git-fat'
 cat > .gitattributes <<EOF
 original-attributes -text
@@ -34,7 +35,7 @@ git filter-branch --index-filter "git fat index-filter $(fullpath fat-files) --m
 
 git log --stat
 git checkout HEAD^
-rm *
+rm -rf *
 git checkout .
 ls -al
 

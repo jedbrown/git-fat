@@ -26,8 +26,9 @@ git commit -m'add broken symlink'
 echo 'fat content a' > a.fat
 git add a.fat
 git commit -m'add a.fat'
-echo 'fat content b' > b.fat
-git add b.fat
+mkdir sub
+echo 'fat content b' > sub/b.fat
+git add sub/b.fat
 git commit -m'add b.fat'
 echo 'revise fat content a' > a.fat
 git commit -am'revise a.fat'
@@ -59,10 +60,10 @@ rm d
 git fat pull
 
 # Check verify command finds corrupt object
-mv .git/fat/objects/b.fat.6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8 \
-   .git/fat/objects/b.fat.6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8.bak
-echo "Not the right data" > .git/fat/objects/b.fat.6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8
+mv .git/fat/objects/sub/b.fat.6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8 \
+   .git/fat/objects/sub/b.fat.6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8.bak
+echo "Not the right data" > .git/fat/objects/sub/b.fat.6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8
 git fat verify && true
 if [ $? -eq 0 ]; then echo "Verify did not detect invalid object"; exit 1; fi
-mv .git/fat/objects/b.fat.6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8.bak \
-   .git/fat/objects/b.fat.6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8
+mv .git/fat/objects/sub/b.fat.6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8.bak \
+   .git/fat/objects/sub/b.fat.6ecec2e21d3033e7ba53e2db63f69dbd3a011fa8

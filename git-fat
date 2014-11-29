@@ -336,7 +336,7 @@ class GitFat(object):
             self.verbose('git-fat filter-smudge: not a managed file (%s)' % fname)
             cat_iter(result, sys.stdout)
     def catalog_objects(self):
-        return set(os.listdir(self.objdir))
+        return set([os.path.join(dp[len(self.objdir)+1:], f) for dp, dn, filenames in os.walk(self.objdir) for f in filenames])
     def referenced_objects(self, rev=None, all=False):
         referenced = set()
         if all:
@@ -457,7 +457,7 @@ class GitFat(object):
         if len(files) == 0:
             return
         cmd = self.pushpull_to_rsync(push=True, cnt=len(files))
-        self.verbose('Executing: %s' % ' '.join(cmd))
+        self.verbose('git-fat push to remote Executing: %s' % ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         p.communicate(input='\x00'.join(files))
         if p.returncode:
