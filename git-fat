@@ -291,7 +291,6 @@ class GitFat(object):
                 objfile = os.path.join(self.objdir, fname + '.' + digest)
                 if not ishanging:
                     if os.path.exists(objfile):
-                        self.verbose('git-fat filter-clean: cache already exists %s' % objfile)
                         os.remove(tmpname)
                     else:
                         # Set permissions for the new file using the current umask
@@ -592,7 +591,7 @@ class GitFat(object):
             for block in readblocks(open(fname)):
                 h.update(block)
             data_hash = h.hexdigest()
-            if obj != data_hash:
+            if not obj.endswith(data_hash):
                 corrupted_objects.append((obj, data_hash))
         if corrupted_objects:
             print('Corrupted objects: %d' % len(corrupted_objects))
