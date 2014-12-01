@@ -1,0 +1,110 @@
+#!/bin/bash
+
+test "$4" || { 
+    echo "Convert an existing git repo to a new git fat repo."
+    echo "usage: $(basename $0) <src-repo> <dest-repo> <gitattribute-file> <remote-value> {<share-value>}" ; 
+    echo "    The <dest-repo> should be non-existent or an already created empty repository."
+    exit 1 ; 
+}
+
+SRC_REPO="$(readlink -f $1)" && shift
+test "$1" && DEST_REPO="$(readlink -f $1)" && shift
+test "$1" && GIT_ATTRIBUTES="$(readlink -f $1)" && shift
+test "$1" && GIT_FAT_REMOTE="$1" && shift
+test "$1" && GIT_FAT_SHARE="$(readlink -f $1)" && shift
+
+test "$DEST_REPO" || DEST_REPO="${SRC_REPO}.fat"
+
+echo; echo "Contents of .gitattributes file"
+cat $GIT_ATTRIBUTES
+
+GIT_FAT="$(mktemp)"
+trap "rm -f $GIT_FAT" EXIT SIGTERM
+cat << EOF > $GIT_FAT
+[rsync]
+remote = $GIT_FAT_REMOTE/$(basename $SRC_REPO)
+EOF
+
+
+echo ; echo "Contents of .gitfat file"
+test "$GIT_FAT" && cat $GIT_FAT
+
+GIT_ATTRIBUTES_SIZE="$(stat -c %s $GIT_ATTRIBUTES)"
+GIT_FAT_SIZE="$(stat -c %s $GIT_FAT)"
+
+echo; echo "Exporting data from $SRC_REPO"
+pushd $SRC_REPO &>/dev/null && {
+
+    # Add in blob for .gitattributes file
+    cat << EOF > .fast-export
+blob
+mark :1000000
+data $((GIT_ATTRIBUTES_SIZE + 1))
+EOF
+    cat $GIT_ATTRIBUTES >> .fast-export
+    echo >> .fast-export
+
+    # Add in blob for .gitfat file
+    cat << EOF >> .fast-export
+blob
+mark :1000001
+data $((GIT_FAT_SIZE + 1))
+EOF
+    cat $GIT_FAT >> .fast-export
+    echo >> .fast-export
+
+    # Run fast export splitting output on the first commit
+    git fast-export --all | csplit - '/^M [0-9]* :[0-9]* /' >/dev/null
+
+    # Add fast-export data before first commit
+    cat xx00 >> .fast-export
+
+    # Add .gitattribute/.gitfat files to first commit
+    cat << EOF >> .fast-export
+M 100644 :1000000 .gitattributes
+M 100644 :1000001 .gitfat
+EOF
+
+    # Add the rest of the fast-export data
+    cat xx01 >> .fast-export
+
+    rm -f xx00 xx01
+    popd &>/dev/null
+}
+
+echo ; echo "Importing data into $DEST_REPO"
+
+# Create dest repo if it does not exist
+test -e "$DEST_REPO" || {
+    mkdir -p $DEST_REPO
+    git init $DEST_REPO
+}
+
+# Add commits to the destination repository
+pushd $DEST_REPO &>/dev/null && {
+    git fat init
+    cat $SRC_REPO/.fast-export | git fast-import
+
+    echo ; echo "Re-writing history with git fat enabled for $DEST_REPO"
+    git reset --hard HEAD
+    git commit -am'Temporary commit of modifications generated from new .gitattributes file' && TEMP_COMMIT="SUCCESS" || TEMP_COMMIT=""
+    sed 's/ \+filter=fat.*$//' $GIT_ATTRIBUTES | grep -v "^#" > /tmp/fat-filter-files
+    git filter-branch --index-filter 'git fat index-filter /tmp/fat-filter-files' --tag-name-filter cat -- --all
+    git rm --cached -rq .
+    test "$TEMP_COMMIT" && git reset --hard HEAD^ || git reset --hard HEAD
+    git add .
+    git commit -am'Modifications generated from new .gitattributes file'
+
+    echo ; echo "Cleaning up $DEST_REPO"
+    git for-each-ref --format="%(refname)" refs/original/ | xargs -rn 1 git update-ref -d
+    git reflog expire --expire=now --all
+    git gc --prune=now
+    test "$GIT_FAT_SHARE" && git config git-fat.share $GIT_FAT_SHARE
+    git fat push --all
+    git fat gc
+    #git fat checkout
+    #git reset --hard HEAD
+    #git checkout .
+
+    popd &>/dev/null
+}
