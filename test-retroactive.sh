@@ -44,6 +44,7 @@ git checkout master
 cat > .gitfat <<EOF
 [rsync]
 remote = $(fullpath ../retro-store)
+share = $(fullpath ../retro-store)
 EOF
 git add .gitfat
 git commit -m'Add .gitfat for local push'

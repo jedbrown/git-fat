@@ -80,7 +80,6 @@ def cat(instream, outstream):
     return cat_iter(readblocks(instream), outstream)
 def difftreez_reader(input):
     """Incremental reader for git diff-tree -z output
-
     :oldmode newmode oldsha1 newsha1 modflag\0filename\0:oldmode newmode ...
     """
     buffer = []
@@ -155,7 +154,7 @@ class GitFat(object):
     def get_fat_rsync_dirs(self):
         cfgpath = self.get_fat_config()
         remote = gitconfig_get('rsync.remote', file=cfgpath)
-        share = gitconfig_get('rsync.share', file=cfgpath)
+        share = gitconfig_get('git-fat.share')
         if share is None:
             share = gitconfig_get('rsync.local', file=cfgpath)
         if share is None:
@@ -193,24 +192,43 @@ class GitFat(object):
             dst = share         # If share is set up, smudge filter will take care of linking self.objdir to share during merge|rebase step of 'pull', therefore always pull from remote to share here.
             self.verbose('git-fat pushpull_to_rsync: %d file(s) found to pull from %s' % (cnt, remote))
         return self.get_rsync_command(src, dst)
-    def symlink_to_share(self, digest):
-        'Create self.objdir/digest (links) pointing at share/digest if the configuration of share is set up appropriately'
+    def match_digest(self, objpath):
+        if os.access(objpath, os.R_OK):
+            return objpath
+        result = []
+        digest = os.path.splitext(objpath)[1]
+        for root, dirs, files in os.walk(self.objdir):
+            for name in files:
+              if fnmatch.fnmatch(name, '*' + digest):
+                    result.append(os.path.join(root, name))
+        if not result:
+            result.append(objpath)
+        return result[0]
+    def match_from_objdir(self, objpath):
+        matchpath = self.match_digest(objpath)
+        if matchpath != objpath and os.path.exists(matchpath):
+            mkdir_p(os.path.dirname(objpath))
+            shutil.copy(matchpath,objpath)
+    def symlink_to_share(self, objfile):
+        'Create self.objdir/objfile (links) pointing at share/objfile if the configuration of share is set up appropriately'
+        # Do nothing if share is not set up or points at a non-existing path.
         (remote, share) = self.get_fat_rsync_dirs()
-        if share == self.objdir or not os.path.exists(share):       # Do nothing if share is not set up or points at a non-existing path.
+        if share == self.objdir or not os.path.exists(share):       
             return
-        sharefile = os.path.join(share, digest)
-        objfile = os.path.join(self.objdir, digest)
-        if os.path.lexists(objfile):
-            os.remove(objfile)
-        mkdir_p(os.path.dirname(objfile))
-        os.symlink(sharefile, objfile)                              # Note that sharefile may not exist, i.e. may be creating a broken symlink. It is OK as we may not have pulled from remote (to share) yet.
-    def convert_digest_to_symlink(self, files, share):
-        'Replace self.objdir/digest in files with links pointing at share/digest'
-        for digest in files:
-            fat = os.path.join(self.objdir, digest)
-            sharefile = os.path.join(share, digest)
-            os.remove(fat)
-            os.symlink(sharefile, fat)
+        objpath = os.path.join(self.objdir, objfile)
+        if os.path.lexists(objpath):
+            os.remove(objpath)
+        sharepath = os.path.join(share, objfile)
+        # Note that sharepath may not exist, i.e. may be creating a broken symlink. It is OK as we may not have pulled from remote (to share) yet.
+        mkdir_p(os.path.dirname(objpath))
+        os.symlink(sharepath, objpath)                              
+    def convert_objfile_to_symlink(self, files, share):
+        'Replace self.objdir/objfile in files with links pointing at share/objfile'
+        for objfile in files:
+            objpath = os.path.join(self.objdir, objfile)
+            sharepath = os.path.join(share, objfile)
+            os.remove(objpath)
+            os.symlink(sharepath, objpath)
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
     def encode_v1(self, digest, bytes):
@@ -288,15 +306,16 @@ class GitFat(object):
             # Skip empty files
             if bytes != 0:
                 digest = h.hexdigest()
-                objfile = os.path.join(self.objdir, fname + '.' + digest)
+                objfile = fname + '.' + digest
+                objpath = os.path.join(self.objdir, objfile)
                 if not ishanging:
-                    if os.path.exists(objfile):
+                    if os.path.exists(objpath):
                         os.remove(tmpname)
                     else:
                         # Set permissions for the new file using the current umask
                         os.chmod(tmpname, int('444', 8) & ~umask())
-                        mkdir_p(os.path.dirname(objfile))
-                        os.rename(tmpname, objfile)
+                        mkdir_p(os.path.dirname(objpath))
+                        os.rename(tmpname, objpath)
                         self.verbose('git-fat filter-clean: caching to %s' % objfile)
                     cached = True
                     outstreamclean.write(self.encode(digest, bytes))
@@ -316,16 +335,16 @@ class GitFat(object):
         self.setup()
         result, bytes = self.decode_stream(sys.stdin)
         if isinstance(result, str):       # We got a digest
-            result = fname + '.' + result;
-            objfile = os.path.join(self.objdir, result)
-            if not os.access(objfile, os.R_OK):
-                self.verbose('git-fat filter-smudge: fat object missing %s - will query share, if available, and try again' % objfile)
-                self.symlink_to_share(result)
-            if not os.access(objfile, os.R_OK):
-                self.verbose('git-fat filter-smudge: fat object missing %s - will query remote, if available, and try again' % objfile)
-                self.pull_from_remote(set([result]))
+            objfile = fname + '.' + result
+            objpath = os.path.join(self.objdir, objfile)
+            if not os.access(objpath, os.R_OK):
+                self.match_from_objdir(objpath)
+            if not os.access(objpath, os.R_OK):
+                self.symlink_to_share(objfile)
+            if not os.access(objpath, os.R_OK):
+                self.pull_from_remote(set([objfile]))
             try:
-                cat(open(objfile), sys.stdout)
+                cat(open(objpath), sys.stdout)
                 self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
             except IOError:                 # file not found
                 self.verbose('git-fat filter-smudge: fat object missing %s' % objfile)
@@ -424,18 +443,20 @@ class GitFat(object):
 
     def fat_files(self):
         fatfiles = set()
-        for fatfile in self.catalog_objects():
-            if fatfile != '' and not os.path.islink(os.path.join(self.objdir, fatfile)):
-                fatfiles.add(fatfile)
+        for objfile in self.catalog_objects():
+            if objfile != '' and not os.path.islink(os.path.join(self.objdir, objfile)):
+                fatfiles.add(objfile)
         return fatfiles
 
     def cmd_status(self, args):
         self.setup()
         catalog = self.catalog_objects()
+        self.verbose("catalog %s\n" % catalog)
         refargs = dict()
         if '--all' in args:
             refargs['all'] = True
         referenced = self.referenced_objects(**refargs)
+        self.verbose("referenced %s\n" % referenced)
         garbage = catalog - referenced
         orphans = referenced - catalog
         if '--all' in args:
@@ -474,24 +495,15 @@ class GitFat(object):
         p.communicate(input='\x00'.join(files))
         if p.returncode:
             sys.exit(p.returncode)
-        self.convert_digest_to_symlink(files, share)
-    def git_upstream_exists(self):
-        args = ['git', 'name-rev', '@{upstream}']
-        p = subprocess.Popen(args, stdout=subprocess.PIPE)
-        output = p.communicate()[0].strip()
-        if p.returncode or not output:
-            return False
-        else:
-            return True
+        self.convert_objfile_to_symlink(files, share)
     def cmd_pre_push(self, args):
-        if self.git_upstream_exists():
-            self.cmd_push("")
+        self.cmd_push("")
     def cmd_push(self, args):
         'Push all fat files that I have stored and referenced'
         self.setup()
         (remote, share) = self.get_fat_rsync_dirs()
-	if remote is None:
-		return
+        if remote is None:
+            return
         # Default to push only those objects referenced by current HEAD (includes history)
         pushall = '--all' in args
         files = self.referenced_objects(all=pushall) & self.fat_files()
@@ -501,14 +513,14 @@ class GitFat(object):
         'Update any stale files in the present working tree'
         self.assert_init_done()
         for digest, fname in self.orphan_files():
-            digest = fname + '.' + digest;
-            objpath = os.path.join(self.objdir, digest)
+            objfile = fname + '.' + digest
+            objpath = os.path.join(self.objdir, objfile)
             if not os.access(objpath, os.R_OK):
-                self.symlink_to_share(digest)
+                self.symlink_to_share(objfile)
             if not os.access(objpath, os.R_OK):
-                self.pull_from_remote(set([digest]))
+                self.pull_from_remote(set([objfile]))
             if os.access(objpath, os.R_OK):
-                print('Restoring %s -> %s' % (digest, fname))
+                print('Restoring %s -> %s' % (objfile, fname))
                 # The output of our smudge filter depends on the existence of
                 # the file in .git/fat/objects, but git caches the file stat
                 # from the previous time the file was smudged, therefore it
@@ -519,7 +531,7 @@ class GitFat(object):
                 # This re-smudge is essentially a copy that restores permissions.
                 subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname])
             elif show_orphans:
-                print('Data unavailable: %s %s' % (digest,fname))
+                print('Data unavailable: %s' % objfile)
     def pull_from_remote(self, files):
         'Since this sub is also used by cmd_filter_smudge, stdout needs to be nothing but what git expects => throw away stdout of rsync'
         if len(files) == 0:
@@ -531,17 +543,15 @@ class GitFat(object):
         if p.returncode:
             sys.exit(p.returncode)
     def cmd_post_merge(self, args):
-        if self.git_upstream_exists():
-            self.cmd_pull("")
+        self.cmd_pull("")
     def cmd_pre_rebase(self, args):
-        if self.git_upstream_exists():
-            self.cmd_pull("")
+        self.cmd_pull("")
     def cmd_pull(self, args):
         'Pull anything that I have referenced, but not stored'
         self.setup()
         (remote, share) = self.get_fat_rsync_dirs()
-	if remote is None:
-		return
+        if remote is None:
+            return
         refargs = dict()
         if '--all' in args:
             refargs['all'] = True
@@ -577,26 +587,26 @@ class GitFat(object):
     def cmd_gc(self):
         garbage = self.catalog_objects() - self.referenced_objects()
         print('Unreferenced objects to remove: %d' % len(garbage))
-        for obj in garbage:
-            fname = os.path.join(self.objdir, obj)
-            print('%10d %s' % (os.stat(fname).st_size, obj))
-            os.remove(fname)
+        for objfile in garbage:
+            objpath = os.path.join(self.objdir, objfile)
+            print('%10d %s' % (os.stat(objpath).st_size, objfile))
+            os.remove(objpath)
 
     def cmd_verify(self):
         """Print details of git-fat objects with incorrect data hash"""
         corrupted_objects = []
-        for obj in self.catalog_objects():
-            fname = os.path.join(self.objdir, obj)
+        for objfile in self.catalog_objects():
+            objpath = os.path.join(self.objdir, objfile)
             h = hashlib.new('sha1')
-            for block in readblocks(open(fname)):
+            for block in readblocks(open(objpath)):
                 h.update(block)
             data_hash = h.hexdigest()
-            if not obj.endswith(data_hash):
-                corrupted_objects.append((obj, data_hash))
+            if not objfile.endswith(data_hash):
+                corrupted_objects.append((objfile, data_hash))
         if corrupted_objects:
             print('Corrupted objects: %d' % len(corrupted_objects))
-            for obj, data_hash in corrupted_objects:
-                print('%s data hash is %s' % (obj, data_hash))
+            for objfile, data_hash in corrupted_objects:
+                print('%s data hash is %s' % (objfile, data_hash))
             sys.exit(1)
 
     def fat_init_one(self, var, value):
@@ -606,32 +616,28 @@ class GitFat(object):
             return True
         return False
     def fat_init_all(self):
-        ret = False
-        
+        ret = False        
         post_merge = os.path.join(self.gitdir, 'hooks', 'post-merge')
         if not os.path.isfile(post_merge):
             with open(post_merge, "w") as f:
-                lines = ["#!/bin/sh -ex\n", "git fat post-merge \"$@\"\n"]
+                lines = ["#!/bin/sh\n", "git-fat post-merge \"$@\"\n"]
                 f.writelines(lines)
             os.chmod(post_merge, 0755)
             ret = True
-        
         pre_rebase = os.path.join(self.gitdir, 'hooks', 'pre-rebase')
         if not os.path.isfile(pre_rebase):
             with open(pre_rebase, "w") as f:
-                lines = ["#!/bin/sh -ex\n", "git fat pre-rebase \"$@\"\n"]
+                lines = ["#!/bin/sh\n", "git-fat pre-rebase \"$@\"\n"]
                 f.writelines(lines)
             os.chmod(pre_rebase, 0755)         
             ret = True
-        
         pre_push = os.path.join(self.gitdir, 'hooks', 'pre-push')
         if not os.path.isfile(pre_push):
             with open(pre_push, "w") as f:
-                lines = ["#!/bin/sh -ex\n", "git fat pre-push \"$@\"\n"]
+                lines = ["#!/bin/sh\n", "git-fat pre-push \"$@\"\n"]
                 f.writelines(lines)
             os.chmod(pre_push, 0755)         
             ret = True
-        
         ret = self.fat_init_one('filter.fat.clean', 'git-fat filter-clean %f') or ret
         ret = self.fat_init_one('filter.fat.smudge', 'git-fat filter-smudge %f') or ret
         ret = self.fat_init_one('filter.fat.required', 'true') or ret
@@ -639,7 +645,7 @@ class GitFat(object):
     def cmd_init(self):
         self.setup()
         if self.fat_init_all() is True:
-            self.cmd_post_merge("")
+            #self.cmd_post_merge("")
             print('Initialized git fat')
     def gen_large_blobs(self, revs, threshsize):
         """Build dict of all blobs"""
@@ -758,16 +764,17 @@ class GitFat(object):
         except GitFat.ConfigError:
             (remote, share) = ('', objdir)
             pass
+        print('- remote  : Rsync destination containing pushed out fat files.')
+        print('            This rsync destination is where everyone who uses this repo pushes their fat files onto.')
+        print('            (' + remote + ')')
+        print('remote is configured via ' + self.get_fat_config())
         print('- share   : Directory containing pushed out fat files.')
         print('            To increase performance, you are recommended to set this spot to be on a local NAS on your site.')
         print('            This directory is shared across all your repos/wcps as well as by your peers if they are using it.')
         print('            Setting up this directory offers disk space saving as well as allows fine grained push operation => faster push performance.')
         print('            If this configuration option is not set up, its value defaults to \'objdir\'.')
         print('            (' + share + ')')
-        print('- remote  : Rsync destination containing pushed out fat files.')
-        print('            This rsync destination is where everyone who uses this repo pushes their fat files onto.')
-        print('            (' + remote + ')')
-        print('share and remote are configured via ' + self.get_fat_config())
+        print('share is configured via \'git config git-fat.share\'')
         print()
         # Definitions
         print('Definitions used by git-fat:')
