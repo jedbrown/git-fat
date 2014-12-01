@@ -186,11 +186,11 @@ class GitFat(object):
         if push:
             src = self.objdir
             dst = remote
-            self.verbose('git-fat pushpull_to_rsync: %d file(s) found to push to %s' % (cnt, remote))
+            self.verbose('git-fat : %d file(s) found to push to %s' % (cnt, remote))
         else:
             src = remote
             dst = share         # If share is set up, smudge filter will take care of linking self.objdir to share during merge|rebase step of 'pull', therefore always pull from remote to share here.
-            self.verbose('git-fat pushpull_to_rsync: %d file(s) found to pull from %s' % (cnt, remote))
+            self.verbose('git-fat : %d file(s) found to pull from %s' % (cnt, remote))
         return self.get_rsync_command(src, dst)
     def match_digest(self, objpath):
         if os.access(objpath, os.R_OK):
@@ -451,12 +451,10 @@ class GitFat(object):
     def cmd_status(self, args):
         self.setup()
         catalog = self.catalog_objects()
-        self.verbose("catalog %s\n" % catalog)
         refargs = dict()
         if '--all' in args:
             refargs['all'] = True
         referenced = self.referenced_objects(**refargs)
-        self.verbose("referenced %s\n" % referenced)
         garbage = catalog - referenced
         orphans = referenced - catalog
         if '--all' in args:
