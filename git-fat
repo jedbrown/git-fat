@@ -594,7 +594,7 @@ class GitFat(object):
         print('Unreferenced objects to remove: %d' % len(garbage))
         for objfile in garbage:
             objpath = os.path.join(self.objdir, objfile)
-            print('%10d %s' % (os.stat(objpath).st_size, objfile))
+            print('%s' % objfile)
             os.remove(objpath)
 
     def cmd_verify(self):
@@ -816,6 +816,7 @@ class GitFat(object):
         print('- git fat checkout  : Converts all orphan objects into non-orphan state, while automatically executing \'pull\'-like functionality for the specific orphan file.')
         print('- git fat gc        : Deletes all garbage objects')
         print('- git fat verify    : Report corrupt fat objects in the catalog')
+        print('- git fat share     : Set/Get current share setting')
         print('- More info?        : Define export var GIT_FAT_VERBOSE and continue using git-fat.')
         print('')
         print('Typical git operations, when is git-fat involved and what it does when it is invoked:')

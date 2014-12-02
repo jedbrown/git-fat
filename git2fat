@@ -23,8 +23,16 @@ trap "rm -f $GIT_FAT" EXIT SIGTERM
 cat << EOF > $GIT_FAT
 [rsync]
 remote = $GIT_FAT_REMOTE/$(basename $SRC_REPO)
+
 EOF
 
+test "$GIT_FAT_SHARE" && {
+cat << EOF >> $GIT_FAT
+[share]
+default = $GIT_FAT_SHARE/$(basename $SRC_REPO)
+
+EOF
+}
 
 echo ; echo "Contents of .gitfat file"
 test "$GIT_FAT" && cat $GIT_FAT
@@ -99,7 +107,6 @@ pushd $DEST_REPO &>/dev/null && {
     git for-each-ref --format="%(refname)" refs/original/ | xargs -rn 1 git update-ref -d
     git reflog expire --expire=now --all
     git gc --prune=now
-    test "$GIT_FAT_SHARE" && git config git-fat.share $GIT_FAT_SHARE
     git fat push --all
     git fat gc
     #git fat checkout
