@@ -120,6 +120,13 @@ def gitconfig_set(name, value, file=None):
     args += [name, value]
     p = subprocess.check_call(args)
 
+def gitconfig_unset(name, file=None):
+    args = ['git', 'config', '--unset']
+    if file is not None:
+        args += ['--file', file]
+    args += [name]
+    p = subprocess.call(args)
+
 class GitFat(object):
     DecodeError = RuntimeError
     ConfigError = RuntimeError
@@ -151,12 +158,12 @@ class GitFat(object):
         self.fat_init_all()     # Upgrade old git-fat setup to the latest one
     def get_fat_config(self):
         return os.path.join(self.gitroot,'.gitfat')
-    def get_fat_rsync_dirs(self):
+    def get_fat_configs(self):
         cfgpath = self.get_fat_config()
         remote = gitconfig_get('rsync.remote', file=cfgpath)
         share = gitconfig_get('git-fat.share')
         if share is None:
-            share = gitconfig_get('rsync.local', file=cfgpath)
+            share = gitconfig_get('share.default', file=cfgpath)
         if share is None:
             share = self.objdir
         return remote, share
@@ -182,7 +189,7 @@ class GitFat(object):
         cmd += [src + '/', dst + '/']
         return cmd
     def pushpull_to_rsync(self,push,cnt):
-        (remote, share) = self.get_fat_rsync_dirs()
+        (remote, share) = self.get_fat_configs()
         if push:
             src = self.objdir
             dst = remote
@@ -212,7 +219,7 @@ class GitFat(object):
     def symlink_to_share(self, objfile):
         'Create self.objdir/objfile (links) pointing at share/objfile if the configuration of share is set up appropriately'
         # Do nothing if share is not set up or points at a non-existing path.
-        (remote, share) = self.get_fat_rsync_dirs()
+        (remote, share) = self.get_fat_configs()
         if share == self.objdir or not os.path.exists(share):       
             return
         objpath = os.path.join(self.objdir, objfile)
@@ -481,7 +488,7 @@ class GitFat(object):
         if p.returncode:
             sys.exit(p.returncode)
     def push_to_share(self, files):
-        (remote, share) = self.get_fat_rsync_dirs()
+        (remote, share) = self.get_fat_configs()
         # Do nothing if share is not set up or points at a non-existing path.
         if share == self.objdir or not os.path.exists(share):
             return
@@ -493,13 +500,13 @@ class GitFat(object):
         p.communicate(input='\x00'.join(files))
         if p.returncode:
             sys.exit(p.returncode)
-        self.convert_objfile_to_symlink(files, share)
+        self.convert_objfile_to_symlink(self.catalog_objects(), share)
     def cmd_pre_push(self, args):
         self.cmd_push("")
     def cmd_push(self, args):
         'Push all fat files that I have stored and referenced'
         self.setup()
-        (remote, share) = self.get_fat_rsync_dirs()
+        (remote, share) = self.get_fat_configs()
         if remote is None:
             return
         # Default to push only those objects referenced by current HEAD (includes history)
@@ -547,7 +554,7 @@ class GitFat(object):
     def cmd_pull(self, args):
         'Pull anything that I have referenced, but not stored'
         self.setup()
-        (remote, share) = self.get_fat_rsync_dirs()
+        (remote, share) = self.get_fat_configs()
         if remote is None:
             return
         refargs = dict()
@@ -750,7 +757,17 @@ class GitFat(object):
         updateindex.stdin.close()
         lsfiles.wait()
         updateindex.wait()
-
+    def cmd_share(self, args):
+        if len(args):
+            if args[0] == 'default':
+                gitconfig_unset('git-fat.share')
+            else:
+                gitconfig_set('git-fat.share',args[0])
+            (remote, share) = self.get_fat_configs()
+            self.convert_objfile_to_symlink(self.catalog_objects(),share)
+        else:
+            (remote, share) = self.get_fat_configs()
+            print('%s' % share)
     def cmd_help(self):
         objdir = os.path.join(self.gitroot, self.objdir)
         # Directories
@@ -758,21 +775,26 @@ class GitFat(object):
         print('- objdir : Contains fat objects(files and/or shared links). Shared links will only exist if \'share\' is configured.')
         print('            (' + objdir + ')')
         try:
-            (remote, share) = self.get_fat_rsync_dirs()
+            (remote, share) = self.get_fat_configs()
         except GitFat.ConfigError:
             (remote, share) = ('', objdir)
             pass
+        if remote is None:
+            remote = 'null'
+        if share is None:
+            share = 'null'
         print('- remote  : Rsync destination containing pushed out fat files.')
         print('            This rsync destination is where everyone who uses this repo pushes their fat files onto.')
         print('            (' + remote + ')')
-        print('remote is configured via ' + self.get_fat_config())
+        print('remote is configured via rsync.remote in ' + self.get_fat_config())
         print('- share   : Directory containing pushed out fat files.')
         print('            To increase performance, you are recommended to set this spot to be on a local NAS on your site.')
         print('            This directory is shared across all your repos/wcps as well as by your peers if they are using it.')
         print('            Setting up this directory offers disk space saving as well as allows fine grained push operation => faster push performance.')
         print('            If this configuration option is not set up, its value defaults to \'objdir\'.')
         print('            (' + share + ')')
-        print('share is configured via \'git config git-fat.share\'')
+        print('default share is configured via share.default in ' + self.get_fat_config())
+        print('share is configured via \'git fat share {default|<path>}\'')
         print()
         # Definitions
         print('Definitions used by git-fat:')
@@ -853,6 +875,8 @@ if __name__ == '__main__':
         fat.cmd_find(sys.argv[2:])
     elif cmd == 'index-filter':
         fat.cmd_index_filter(sys.argv[2:])
+    elif cmd == 'share':
+        fat.cmd_share(sys.argv[2:])
     elif cmd == 'help':
         fat.cmd_help()
     else:
