@@ -622,30 +622,33 @@ class GitFat(object):
         return False
     def fat_init_all(self):
         ret = False        
+        ret = self.fat_init_one('filter.fat.clean', 'git-fat filter-clean %f') or ret
+        ret = self.fat_init_one('filter.fat.smudge', 'git-fat filter-smudge %f') or ret
+        ret = self.fat_init_one('filter.fat.required', 'true') or ret
         post_merge = os.path.join(self.gitdir, 'hooks', 'post-merge')
-        if not os.path.isfile(post_merge):
+        if ret or not os.path.isfile(post_merge):
             with open(post_merge, "w") as f:
                 lines = ["#!/bin/sh\n", "git-fat post-merge \"$@\"\n"]
                 f.writelines(lines)
             os.chmod(post_merge, 0755)
             ret = True
         pre_rebase = os.path.join(self.gitdir, 'hooks', 'pre-rebase')
-        if not os.path.isfile(pre_rebase):
+        if ret or not os.path.isfile(pre_rebase):
             with open(pre_rebase, "w") as f:
                 lines = ["#!/bin/sh\n", "git-fat pre-rebase \"$@\"\n"]
                 f.writelines(lines)
             os.chmod(pre_rebase, 0755)         
             ret = True
         pre_push = os.path.join(self.gitdir, 'hooks', 'pre-push')
-        if not os.path.isfile(pre_push):
+        if ret or not os.path.isfile(pre_push):
             with open(pre_push, "w") as f:
                 lines = ["#!/bin/sh\n", "git-fat pre-push \"$@\"\n"]
                 f.writelines(lines)
             os.chmod(pre_push, 0755)         
             ret = True
-        ret = self.fat_init_one('filter.fat.clean', 'git-fat filter-clean %f') or ret
-        ret = self.fat_init_one('filter.fat.smudge', 'git-fat filter-smudge %f') or ret
-        ret = self.fat_init_one('filter.fat.required', 'true') or ret
+        pre_commit = os.path.join(self.gitdir, 'hooks', 'pre-commit')
+        if ret and os.path.isfile(pre_commit):
+            os.remove(pre_commit)
         return ret
     def cmd_init(self):
         self.setup()
