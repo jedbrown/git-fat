@@ -146,8 +146,6 @@ class GitFat(object):
             return len(enc(hashlib.sha1('dummy').hexdigest(), 5))
         self.magiclen = magiclen(self.encode) # Current version
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
-    def setup(self):
-        mkdir_p(self.objdir)
     def is_init_done(self):
         return gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge')
     def assert_init_done(self):
@@ -335,11 +333,11 @@ class GitFat(object):
         The clean filter runs when a file is added to the index. It gets the "smudged" (tree)
         version of the file on stdin and produces the "clean" (repository) version on stdout.
         '''
-        self.setup()
+        self.cmd_init()
         self.filter_clean(sys.stdin, sys.stdout, fname)
 
     def cmd_filter_smudge(self, fname):
-        self.setup()
+        self.cmd_init()
         result, bytes = self.decode_stream(sys.stdin)
         if isinstance(result, str):       # We got a digest
             objfile = fname + '.' + result
@@ -456,7 +454,6 @@ class GitFat(object):
         return fatfiles
 
     def cmd_status(self, args):
-        self.setup()
         catalog = self.catalog_objects()
         refargs = dict()
         if '--all' in args:
@@ -502,10 +499,10 @@ class GitFat(object):
             sys.exit(p.returncode)
         self.convert_objfile_to_symlink(self.catalog_objects(), share)
     def cmd_pre_push(self, args):
+        self.cmd_init()
         self.cmd_push("")
     def cmd_push(self, args):
         'Push all fat files that I have stored and referenced'
-        self.setup()
         (remote, share) = self.get_fat_configs()
         if remote is None:
             return
@@ -548,12 +545,13 @@ class GitFat(object):
         if p.returncode:
             sys.exit(p.returncode)
     def cmd_post_merge(self, args):
+        self.cmd_init()
         self.cmd_pull("")
     def cmd_pre_rebase(self, args):
+        self.cmd_init()
         self.cmd_pull("")
     def cmd_pull(self, args):
         'Pull anything that I have referenced, but not stored'
-        self.setup()
         (remote, share) = self.get_fat_configs()
         if remote is None:
             return
@@ -626,34 +624,30 @@ class GitFat(object):
         ret = self.fat_init_one('filter.fat.smudge', 'git-fat filter-smudge %f') or ret
         ret = self.fat_init_one('filter.fat.required', 'true') or ret
         post_merge = os.path.join(self.gitdir, 'hooks', 'post-merge')
-        if ret or not os.path.isfile(post_merge):
+        if not os.path.isfile(post_merge):
             with open(post_merge, "w") as f:
                 lines = ["#!/bin/sh\n", "git-fat post-merge \"$@\"\n"]
                 f.writelines(lines)
             os.chmod(post_merge, 0755)
             ret = True
         pre_rebase = os.path.join(self.gitdir, 'hooks', 'pre-rebase')
-        if ret or not os.path.isfile(pre_rebase):
+        if not os.path.isfile(pre_rebase):
             with open(pre_rebase, "w") as f:
                 lines = ["#!/bin/sh\n", "git-fat pre-rebase \"$@\"\n"]
                 f.writelines(lines)
             os.chmod(pre_rebase, 0755)         
             ret = True
         pre_push = os.path.join(self.gitdir, 'hooks', 'pre-push')
-        if ret or not os.path.isfile(pre_push):
+        if not os.path.isfile(pre_push):
             with open(pre_push, "w") as f:
                 lines = ["#!/bin/sh\n", "git-fat pre-push \"$@\"\n"]
                 f.writelines(lines)
             os.chmod(pre_push, 0755)         
             ret = True
-        pre_commit = os.path.join(self.gitdir, 'hooks', 'pre-commit')
-        if ret and os.path.isfile(pre_commit):
-            os.remove(pre_commit)
         return ret
     def cmd_init(self):
-        self.setup()
+        mkdir_p(self.objdir)
         if self.fat_init_all() is True:
-            #self.cmd_post_merge("")
             print('Initialized git fat')
     def gen_large_blobs(self, revs, threshsize):
         """Build dict of all blobs"""
@@ -850,6 +844,7 @@ class GitFat(object):
 
 if __name__ == '__main__':
     fat = GitFat()
+    fat.cmd_init()
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'filter-clean':
         fat.cmd_filter_clean(sys.argv[2])
