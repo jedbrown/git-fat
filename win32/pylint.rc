@@ -1,0 +1,15 @@
+[MESSAGES CONTROL]
+
+disable=locally-disabled,too-few-public-methods,line-too-long,missing-docstring,too-many-public-methods,superfluous-parens,global-statement,too-many-locals,super-init-not-called,abstract-method,fixme,no-self-use,too-many-arguments,star-args,too-many-statements,interface-not-implemented,too-many-instance-attributes,too-many-branches,too-many-lines
+
+[BASIC]
+
+good-names=i,j,k,ex,Run,_
+method-rgx=[a-zA-Z_][a-zA-Z0-9_]{2,50}$
+variable-rgx=[a-zA-Z_][a-zA-Z0-9_]{0,50}$
+argument-rgx=[a-zA-Z_][a-z0-9_]{0,30}$
+const-rgx=(([a-zA-Z_][a-zA-Z0-9_]*)|(__.*__))$
+
+[VARIABLES]
+
+dummy-variables-rgx=_$|dummy|unused

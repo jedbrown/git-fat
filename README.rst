@@ -33,6 +33,13 @@ Features
 -  Only depends on Python 2.7 and a backend
 -  Supports anonymous downloads of files over http
 
+Compatibility
+-------------
+
+OS support: Linux, Mac, Windows.
+
+Python support: only 2.x
+
 Installation
 ------------
 
@@ -48,6 +55,29 @@ Or you can install it simply by placing it on your path.
 
     curl https://raw.github.com/cyaninc/git-fat/master/git_fat/git_fat.py \
     | sudo tee /usr/local/bin/git-fat && sudo chmod +x /usr/local/bin/git-fat
+
+Installation on Windows
+-----------------------
+
+To install from PyPI type:
+
+::
+
+    pip install --upgrade git-fat
+
+It is required for the Python27/Scripts directory to be in PATH.
+
+See also other scripts in the win32/ directory:
+
+-  install_win.py - this script ensures that a binary wheel package (.whl)
+   is installed from PyPI. If for example there is a Linux source package
+   (.tar.gz) available and its version number is higher than any of the
+   available .whl packages, then the pip tool would install the Linux
+   source package and for obvious reasons it wouldn't work.
+-  run_tests_xxx.bat - run unit tests
+-  setup.bat - install package from sources
+-  setup_wheel.bat - create a binary Python Wheel package in the dist/
+   directory and install that package
 
 Usage
 -----
