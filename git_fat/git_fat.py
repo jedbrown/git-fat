@@ -77,7 +77,8 @@ GIT_FAT_LOG_FILE = os.getenv("GIT_FAT_LOG_FILE", "")
 def git(cliargs, *args, **kwargs):
     ''' Calls git commands with Popen arguments '''
     if GIT_FAT_LOG_FILE and "--failfast" in sys.argv:
-        # See test_git_fat.py > check_log_file_for_errors()
+        # Flush any prior logger warning/error/critical to the log file
+        # which is being checked by unit tests.
         sys.stdout.flush()
         sys.stderr.flush()
     if GIT_FAT_LOG_LEVEL == _logging.DEBUG:
@@ -88,7 +89,8 @@ def git(cliargs, *args, **kwargs):
 
 def check_output2(args):
     if GIT_FAT_LOG_FILE and "--failfast" in sys.argv:
-        # See test_git_fat.py > check_log_file_for_errors()
+        # Flush any prior logger warning/error/critical to the log file
+        # which is being checked by unit tests.
         sys.stdout.flush()
         sys.stderr.flush()
     if GIT_FAT_LOG_LEVEL == _logging.DEBUG:
@@ -271,9 +273,8 @@ class CopyBackend(BackendInterface):
         other_path = kwargs.get('remote')
         if not os.path.isdir(other_path):
             raise RuntimeError('copybackend target path is not directory: {}'.format(other_path))
-        if GIT_FAT_LOG_LEVEL == _logging.DEBUG:
-            logger.debug("CopyBackend: other_path={}, base_dir={}"
-                         .format(other_path, base_dir))
+        logger.debug("CopyBackend: other_path={}, base_dir={}"
+                     .format(other_path, base_dir))
         self.other_path = other_path
         self.base_dir = base_dir
 
@@ -662,9 +663,8 @@ class GitFat(object):
         '''
         Public command to do the clean (should only be called by git)
         '''
-        if GIT_FAT_LOG_LEVEL == _logging.DEBUG:
-            logger.debug("CLEAN: cur_file={}, args={}"
-                         .format(cur_file, unused_kwargs))
+        logger.debug("CLEAN: cur_file={}, unused_kwargs={}"
+                     .format(cur_file, unused_kwargs))
         if cur_file and not self.can_clean_file(cur_file):
             logger.info(
                 "Not adding: {0}. ".format(cur_file) +
@@ -681,8 +681,7 @@ class GitFat(object):
         '''
         Public command to do the smudge (should only be called by git)
         '''
-        if GIT_FAT_LOG_LEVEL == _logging.DEBUG:
-            logger.debug("SMUDGE: args={}".format(unused_kwargs))
+        logger.debug("SMUDGE: unused_kwargs={}".format(unused_kwargs))
         self._filter_smudge(sys.stdin, sys.stdout)
 
     def find(self, size, **unused_kwargs):
@@ -860,8 +859,8 @@ class GitFat(object):
             # default pull any object referenced but not stored
             files = self._referenced_objects(**kwargs) - cached_objs
 
-        if GIT_FAT_LOG_LEVEL == _logging.DEBUG:
-            logger.debug("PULL: pattern={}, kwargs={}".format(pattern, kwargs))
+        logger.debug("PULL: pattern={}, kwargs={}, len(files)={}"
+                     .format(pattern, kwargs, len(files)))
 
         if not self.backend.pull_files(files):
             sys.exit(1)
@@ -873,9 +872,8 @@ class GitFat(object):
         # Prevents file doesn't exist errors, while saving on bw by default (_referenced only
         # checks HEAD for files)
         files = self._referenced_objects(**kwargs) & self._cached_objects()
-        if GIT_FAT_LOG_LEVEL == _logging.DEBUG:
-            logger.debug("PUSH: unused_pattern={}, kwargs={}"
-                         .format(unused_pattern, kwargs))
+        logger.debug("PUSH: unused_pattern={}, kwargs={}, len(files)={}"
+                     .format(unused_pattern, kwargs, len(files)))
         if not self.backend.push_files(files):
             sys.exit(1)
 
@@ -973,10 +971,6 @@ def _configure_logging(log_level):
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     logger.setLevel(log_level)
-    # if GIT_FAT_LOG_LEVEL == _logging.DEBUG:
-    #     environ = '\n'.join(
-    #         ['  %s=%s' % (key, value) for (key, value) in os.environ.items()])
-    #     logger.debug("os.environ=\n{}".format(environ))
 
 
 def main():
