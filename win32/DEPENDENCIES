@@ -1,0 +1,24 @@
+EXE and DLL dependencies
+========================
+
+GNU Awk 3.0.4
+-------------
+
+git-fat_gawk.exe is from msysgit:
+https://msysgit.github.io/
+
+rsync 3.0.8 (protocol version 30)
+---------------------------------
+
+git-fat_rsync.exe and its dll dependencies are from MSYS:
+http://sourceforge.net/projects/mingw/
+
+rsync-3.0.8-1-msys-1.0.17-bin
+msysCORE-1.0.18-1-msys-1.0.18-bin
+libiconv-1.13.1-2-msys-1.0.13-dll-2
+libintl-0.18.1.1-1-msys-1.0.17-dll-8
+libpopt-1.15-2-msys-1.0.13-dll-0
+openssh-5.4p1-1-msys-1.0.13-bin
+libopenssl-1.0.0-1-msys-1.0.13-dll - msys-crypto-1.0.0.dll
+zlib-1.2.7-1-msys-1.0.17-dll - msys-z.dll
+libminires-1.02_1-2-msys-1.0.13-dll - msys-minires.dll
