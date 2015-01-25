@@ -360,13 +360,14 @@ class RSyncBackend(BackendInterface):
             rsync_tool = 'git-fat_rsync.exe'
         else:
             rsync_tool = 'rsync'
-        cmd_tmpl = (rsync_tool + ' --progress --ignore-existing --from0 '
-                    '--files-from=- {}/ {}/')
+        cmd_tmpl = [rsync_tool] + ' --protect-args --progress'\
+            ' --ignore-existing --from0 --files-from=-'.split()
+
         if push:
             src, dst = self.base_dir, self.remote_url
         else:
             src, dst = self.remote_url, self.base_dir
-        cmd = cmd_tmpl.format(src, dst).split()
+        cmd = cmd_tmpl + [src + '/', dst + '/']
 
         # extra must be passed in as single argv, which is why it's
         # not in the template and split isn't called on it
