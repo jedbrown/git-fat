@@ -94,3 +94,14 @@ BUGFIXES
 INFO
 
 - Added note about fork status
+
+0.4.0
+-----
+
+BUGFIXES
+
+- Fix rsync command for directories with spaces
+
+FEATURES
+
+- Windows Support.  Thanks @CzarekTomczak!
