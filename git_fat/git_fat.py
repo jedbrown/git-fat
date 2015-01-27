@@ -342,8 +342,16 @@ class RSyncBackend(BackendInterface):
 
     def __init__(self, base_dir, **kwargs):
         remote_url = kwargs.get('remote')
-        ssh_user = kwargs.get('sshuser')
-        ssh_port = kwargs.get('sshport', '22')
+
+        # Allow support for rsyncd servers (Looks like "remote = example.org::mybins")
+        ssh_user = ''
+        ssh_port = ''
+        if "::" in  remote_url:
+            self.is_rsyncd_remote = True
+        else:
+            self.is_rsyncd_remote = False
+            ssh_user = kwargs.get('sshuser')
+            ssh_port = kwargs.get('sshport', '22')
 
         if not remote_url:
             raise RuntimeError("No remote url configured for rsync")
@@ -352,6 +360,13 @@ class RSyncBackend(BackendInterface):
         self.ssh_user = ssh_user
         self.ssh_port = ssh_port
         self.base_dir = base_dir
+        # Swap Windows style drive letters (e.g. 't:') for cygwin style drive letters (e.g. '/t')
+        # Otherwise, when using an rsyncd remote (e.g. 'example.org::bin'),
+        # The rsync client on Windows will exit with this error:
+        # "The source and destination cannot both be remote."
+        # Presumably, this is because rsync assumes any path is remote if it contains a colon.
+        if platform.system() == 'Windows' and self.is_rsyncd_remote and self.base_dir.find(':') == 1:
+            self.base_dir = "/" + self.base_dir[0] + self.base_dir[2:]
 
     def _rsync(self, push):
         ''' Construct the rsync command '''
@@ -371,15 +386,21 @@ class RSyncBackend(BackendInterface):
 
         # extra must be passed in as single argv, which is why it's
         # not in the template and split isn't called on it
-        if platform.system() == "Windows":
+        if self.is_rsyncd_remote:
+            extra = ''
+        elif platform.system() == "Windows":
             extra = '--rsh=git-fat_ssh.exe'
         else:
             extra = '--rsh=ssh'
+
         if self.ssh_user:
             extra = ' '.join([extra, '-l {}'.format(self.ssh_user)])
         if self.ssh_port:
             extra = ' '.join([extra, '-p {}'.format(self.ssh_port)])
-        cmd.append(extra)
+
+        if extra:
+            cmd.append(extra)
+
         return cmd
 
     def pull_files(self, file_list):
