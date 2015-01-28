@@ -279,16 +279,16 @@ class CopyBackend(BackendInterface):
         self.base_dir = base_dir
 
     def pull_files(self, file_list):
-
         for f in file_list:
             fullpath = os.path.join(self.other_path, f)
             shutil.copy2(fullpath, self.base_dir)
+        return True
 
     def push_files(self, file_list):
-
         for f in file_list:
             fullpath = os.path.join(self.base_dir, f)
             shutil.copy2(fullpath, self.other_path)
+        return True
 
 
 class HTTPBackend(BackendInterface):
