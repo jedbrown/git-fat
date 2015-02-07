@@ -14,6 +14,8 @@ import itertools
 import threading
 import time
 import collections
+if sys.platform == "win32":
+    import msvcrt
 
 if not type(sys.version_info) is tuple and sys.version_info.major > 2:
     sys.stderr.write('git-fat does not support Python-3 yet.  Please use python2.\n')
@@ -140,6 +142,7 @@ class GitFat(object):
             return len(enc(hashlib.sha1('dummy').hexdigest(), 5))
         self.magiclen = magiclen(self.encode) # Current version
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
+        self.use_scp = True if sys.platform == "win32" else False
     def setup(self):
         mkdir_p(self.objdir)
     def is_init_done(self):
@@ -179,6 +182,36 @@ class GitFat(object):
             cmd += [self.objdir + '/', remote + '/']
         else:
             cmd += [remote + '/', self.objdir + '/']
+        return cmd
+    def get_scp_command(self,push,files):
+        (remote, ssh_port, ssh_user, options) = self.get_rsync()
+        if push:
+            self.verbose('Pushing to %s' % (remote))
+        else:
+            self.verbose('Pulling from %s' % (remote))
+
+        cmd = ['scp']
+        if ssh_port:
+            cmd += ['-P']
+            cmd += [ssh_port]
+        if options:
+            cmd += options.split(' ')
+        if push:
+            cmd += [self.objdir + '/' + x for x in files]
+            if ssh_user:
+                cmd += [ssh_user + '@' + remote + '/']
+            else:
+                cmd += [remote + '/']
+        else:
+            remote_path = ""
+            if ssh_user:
+                remote_path += ssh_user + '@'
+            if sys.platform == "win32":
+                remote_path += remote + '/\{' + ','.join(files) + '\}'
+            else:
+                remote_path += remote + '/{' + ','.join(files) + '}'
+            cmd += [remote_path]
+            cmd += [self.objdir + '/']
         return cmd
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
@@ -240,7 +273,7 @@ class GitFat(object):
         try:
             ishanging = False
             cached = False                # changes to True when file is cached
-            with os.fdopen(fd, 'w') as cache:
+            with os.fdopen(fd, 'wb') as cache:
                 outstream = cache
                 blockiter = readblocks(instream)
                 firstblock = True
@@ -277,15 +310,21 @@ class GitFat(object):
         version of the file on stdin and produces the "clean" (repository) version on stdout.
         '''
         self.setup()
+        if sys.platform == "win32":
+            msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
+            msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
         self.filter_clean(sys.stdin, sys.stdout)
 
     def cmd_filter_smudge(self):
         self.setup()
+        if sys.platform == "win32":
+            msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
+            msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
         result, bytes = self.decode_stream(sys.stdin)
         if isinstance(result, str):       # We got a digest
             objfile = os.path.join(self.objdir, result)
             try:
-                cat(open(objfile), sys.stdout)
+                cat(open(objfile,'rb'), sys.stdout)
                 self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
             except IOError:                 # file not found
                 self.verbose('git-fat filter-smudge: fat object missing %s' % objfile)
@@ -393,13 +432,26 @@ class GitFat(object):
         # Default to push only those objects referenced by current HEAD
         # (includes history). Finer-grained pushing would be useful.
         pushall = '--all' in args
+        if '--scp' in args:
+            self.use_scp = True
+        if '--rsync' in args:
+            self.use_scp = False
         files = self.referenced_objects(all=pushall) & self.catalog_objects()
-        cmd = self.get_rsync_command(push=True)
-        self.verbose('Executing: %s' % ' '.join(cmd))
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input='\x00'.join(files))
-        if p.returncode:
-            sys.exit(p.returncode)
+        if files:
+            if self.use_scp:
+                cmd = self.get_scp_command(push=True, files=files)
+                self.verbose('Executing: %s' % ' '.join(cmd))
+                p = subprocess.Popen(cmd)
+                p.wait()
+                if p.returncode:
+                    sys.exit(p.returncode)
+            else:
+                cmd = self.get_rsync_command(push=True)
+                self.verbose('Executing: %s' % ' '.join(cmd))
+                p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+                p.communicate(input='\x00'.join(files))
+                if p.returncode:
+                    sys.exit(p.returncode)
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
         self.assert_init_done()
@@ -424,6 +476,10 @@ class GitFat(object):
         refargs = dict()
         if '--all' in args:
             refargs['all'] = True
+        if '--scp' in args:
+            self.use_scp = True
+        if '--rsync' in args:
+            self.use_scp = False
         for arg in args:
             if arg.startswith('-') or len(arg) != 40:
                 continue
@@ -431,12 +487,21 @@ class GitFat(object):
             if rev:
                 refargs['rev'] = rev
         files = self.filter_objects(refargs, self.parse_pull_patterns(args))
-        cmd = self.get_rsync_command(push=False)
-        self.verbose('Executing: %s' % ' '.join(cmd))
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input='\x00'.join(files))
-        if p.returncode:
-            sys.exit(p.returncode)
+        if files:
+            if self.use_scp:
+                cmd = self.get_scp_command(push=False, files=files)
+                self.verbose('Executing: %s' % ' '.join(cmd))
+                p = subprocess.Popen(cmd)
+                p.wait()
+                if p.returncode:
+                    sys.exit(p.returncode)
+            else:
+                cmd = self.get_rsync_command(push=False)
+                self.verbose('Executing: %s' % ' '.join(cmd))
+                p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+                p.communicate(input='\x00'.join(files))
+                if p.returncode:
+                    sys.exit(p.returncode)
         self.checkout()
 
     def parse_pull_patterns(self, args):
