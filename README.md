@@ -19,8 +19,9 @@ Some people recommend checking binaries into different repositories or even not 
 # Installation and configuration
 Place `git-fat` in your `PATH`.
 
-Edit `.gitattributes` to regard any desired extensions as fat files.
+Edit (or create) `.gitattributes` to regard any desired extensions as fat files.
 
+    $ cd path-to-your-repository
     $ cat >> .gitattributes
     *.png filter=fat -crlf
     *.jpg filter=fat -crlf
