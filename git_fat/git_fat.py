@@ -583,7 +583,7 @@ class GitFat(object):
 
         revlist.wait()
 
-    def _managed_files(self):
+    def _managed_files(self, **unused_kwargs):
         revlistgen = self._rev_list()
         # Find any objects that are git-fat placeholders which are tracked in the repository
         managed = {}
@@ -816,6 +816,48 @@ class GitFat(object):
         for f in managed.keys():
             print(f, managed.get(f))
 
+    def _remove_orphan_file(self, fname):
+        # The output of our smudge filter depends on the existence of
+        # the file in .git/fat/objects, but git caches the file stat
+        # from the previous time the file was smudged, therefore it
+        # won't try to re-smudge. There's no git command to specifically
+        # invalidate the index cache so we have two options:
+        # Change the file stat mtime or change the file size. However, since
+        # the file mtime only has a granularity of 1s, if we're doing a pull
+        # right after a clone or checkout, it's possible that the modified
+        # time will be the same as in the index. Git knows this can happen
+        # so git checks the file size if the modified time is the same.
+        # The easiest way around this is just to remove the file we want
+        # to replace (since it's an orphan, it should be a placeholder)
+        with open(fname, 'rb') as f:
+            recheck_digest = self._get_digest(f)  # One last sanity check
+        if recheck_digest:
+            delete_file(fname)
+
+    def checkout_all_index(self, show_orphans=False, **unused_kwargs):
+        '''
+        Checkout all files from index when restoring many binaries, to enhance the performance.
+        Need the working directory to be clean.
+        '''
+        # avoid unstaged changed being overwritten
+        if sub.check_output(["git", "ls-files", "-m"]):
+            print('You have unstaged changes in working directory')
+            print('please use "git add <file>..." to stage those changes or use "git checkout -- <file>..." to discard changes ')
+            exit(1)
+
+        for digest, fname in self._orphan_files():
+            objpath = os.path.join(self.objdir, digest)
+            if os.access(objpath, os.R_OK):
+                print('Will restore %s -> %s' % (digest, fname))
+                self._remove_orphan_file(fname)
+            elif show_orphans:
+                print('Data unavailable: %s %s' % (digest, fname))
+
+        print('Restoring files ...')
+        # This re-smudge is essentially a copy that restores permissions.
+        sub.check_call(['git', 'checkout-index', '--index', '--force', '--all'])
+
+
     def checkout(self, show_orphans=False, **unused_kwargs):
         '''
         Update any stale files in the present working tree
@@ -824,26 +866,12 @@ class GitFat(object):
             objpath = os.path.join(self.objdir, digest)
             if os.access(objpath, os.R_OK):
                 print('Restoring %s -> %s' % (digest, fname))
-                # The output of our smudge filter depends on the existence of
-                # the file in .git/fat/objects, but git caches the file stat
-                # from the previous time the file was smudged, therefore it
-                # won't try to re-smudge. There's no git command to specifically
-                # invalidate the index cache so we have two options:
-                # Change the file stat mtime or change the file size. However, since
-                # the file mtime only has a granularity of 1s, if we're doing a pull
-                # right after a clone or checkout, it's possible that the modified
-                # time will be the same as in the index. Git knows this can happen
-                # so git checks the file size if the modified time is the same.
-                # The easiest way around this is just to remove the file we want
-                # to replace (since it's an orphan, it should be a placeholder)
-                with open(fname, 'rb') as f:
-                    recheck_digest = self._get_digest(f)  # One last sanity check
-                if recheck_digest:
-                    delete_file(fname)
+                self._remove_orphan_file(fname)
                 # This re-smudge is essentially a copy that restores permissions.
                 sub.check_call(['git', 'checkout-index', '--index', '--force', fname])
             elif show_orphans:
                 print('Data unavailable: %s %s' % (digest, fname))
+
 
     def can_clean_file(self, filename):
         '''
@@ -887,7 +915,11 @@ class GitFat(object):
         if not self.backend.pull_files(files):
             sys.exit(1)
         # Make sure they're up to date
-        self.checkout()
+        if kwargs.pop("many_binaries", False):
+            print('in accelerating mode')
+            self.checkout_all_index() 
+        else:
+            self.checkout()
 
     def push(self, unused_pattern=None, **kwargs):
         # We only want the intersection of the referenced files and ones we have cached
@@ -1036,6 +1068,8 @@ def main():
 
     sp = subparser.add_parser('pull', help='pull fatfiles from remote git-fat server')
     sp.add_argument("backend", nargs="?", help='pull using given backend')
+    sp.add_argument("--many-binaries", dest='many_binaries', action='store_true', 
+                    help='accelerate pulling a repository which contains many binaries')
     sp.set_defaults(func='pull')
 
     sp = subparser.add_parser('checkout', help='resmudge all orphan objects')
