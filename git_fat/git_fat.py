@@ -72,6 +72,7 @@ def get_log_level(log_level_string):
 
 GIT_FAT_LOG_LEVEL = get_log_level(os.getenv("GIT_FAT_LOG_LEVEL", ""))
 GIT_FAT_LOG_FILE = os.getenv("GIT_FAT_LOG_FILE", "")
+GIT_SSH = os.getenv("GIT_SSH")
 
 
 def git(cliargs, *args, **kwargs):
@@ -388,6 +389,8 @@ class RSyncBackend(BackendInterface):
         # not in the template and split isn't called on it
         if self.is_rsyncd_remote:
             extra = ''
+        elif GIT_SSH:
+            extra = '--rsh={}'.format(GIT_SSH)
         elif platform.system() == "Windows":
             extra = '--rsh=git-fat_ssh.exe'
         else:
@@ -897,20 +900,20 @@ class GitFat(object):
         # File exists but is not a fatfile, don't add it
         return False
 
-    def pull(self, pattern=None, **kwargs):
+    def pull(self, patterns=None, **kwargs):
         """ Get orphans, call backend pull """
         cached_objs = self._cached_objects()
 
         # TODO: Why use _orphan _and_ _referenced here?
-        if pattern:
+        if patterns:
             # filter the working tree by a pattern
-            files = set(digest for digest, fname in self._orphan_files(patterns=(pattern,))) - cached_objs
+            files = set(digest for digest, fname in self._orphan_files(patterns=patterns)) - cached_objs
         else:
             # default pull any object referenced but not stored
             files = self._referenced_objects(**kwargs) - cached_objs
 
-        logger.debug("PULL: pattern={}, kwargs={}, len(files)={}"
-                     .format(pattern, kwargs, len(files)))
+        logger.debug("PULL: patterns={}, kwargs={}, len(files)={}"
+                     .format(patterns, kwargs, len(files)))
 
         if not self.backend.pull_files(files):
             sys.exit(1)
@@ -1070,6 +1073,7 @@ def main():
     sp.add_argument("backend", nargs="?", help='pull using given backend')
     sp.add_argument("--many-binaries", dest='many_binaries', action='store_true', 
                     help='accelerate pulling a repository which contains many binaries')
+    sp.add_argument("patterns", nargs="*", help='files or file patterns to pull')
     sp.set_defaults(func='pull')
 
     sp = subparser.add_parser('checkout', help='resmudge all orphan objects')
@@ -1117,6 +1121,10 @@ def main():
         backend_opt = kwargs.pop('backend', None)
         config_file = kwargs.pop('config_file', None)
         backend = None
+        if kwargs['func'] == 'pull':
+            if backend_opt and backend_opt not in BACKEND_MAP:
+                kwargs['patterns'].insert(0, backend_opt)
+                backend_opt = None
         if kwargs['func'] in require_backend:
             backend = _parse_config(backend=backend_opt, cfg_file_path=config_file)
         run(backend, **kwargs)
