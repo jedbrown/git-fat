@@ -347,7 +347,7 @@ class RSyncBackend(BackendInterface):
         # Allow support for rsyncd servers (Looks like "remote = example.org::mybins")
         ssh_user = ''
         ssh_port = ''
-        if "::" in  remote_url:
+        if "::" in remote_url:
             self.is_rsyncd_remote = True
         else:
             self.is_rsyncd_remote = False
@@ -845,7 +845,8 @@ class GitFat(object):
         # avoid unstaged changed being overwritten
         if sub.check_output(["git", "ls-files", "-m"]):
             print('You have unstaged changes in working directory')
-            print('please use "git add <file>..." to stage those changes or use "git checkout -- <file>..." to discard changes ')
+            print('please use "git add <file>..." to stage those changes'
+                  ' or use "git checkout -- <file>..." to discard changes')
             exit(1)
 
         for digest, fname in self._orphan_files():
@@ -860,7 +861,6 @@ class GitFat(object):
         # This re-smudge is essentially a copy that restores permissions.
         sub.check_call(['git', 'checkout-index', '--index', '--force', '--all'])
 
-
     def checkout(self, show_orphans=False, **unused_kwargs):
         '''
         Update any stale files in the present working tree
@@ -874,7 +874,6 @@ class GitFat(object):
                 sub.check_call(['git', 'checkout-index', '--index', '--force', fname])
             elif show_orphans:
                 print('Data unavailable: %s %s' % (digest, fname))
-
 
     def can_clean_file(self, filename):
         '''
@@ -920,7 +919,7 @@ class GitFat(object):
         # Make sure they're up to date
         if kwargs.pop("many_binaries", False):
             print('in accelerating mode')
-            self.checkout_all_index() 
+            self.checkout_all_index()
         else:
             self.checkout()
 
@@ -1030,6 +1029,24 @@ def _configure_logging(log_level):
     logger.setLevel(log_level)
 
 
+def _load_backend(kwargs):
+    needs_backend = ('pull', 'push')
+    backend_opt = kwargs.pop('backend', None)
+    config_file = kwargs.pop('config_file', None)
+    backend = None
+    if kwargs['func'] == 'pull':
+        # since pull can be of the form pull [backend] [patterns], we need to check
+        # the first argument and insert into file patterns if it's not a backend
+        # this means you can't use a file pattern which is an exact match with
+        # a backend name (e.g. you can't have a file named copy, rsync, http, etc)
+        if backend_opt and backend_opt not in BACKEND_MAP:
+            kwargs['patterns'].insert(0, backend_opt)
+            backend_opt = None
+    if kwargs['func'] in needs_backend:
+        backend = _parse_config(backend=backend_opt, cfg_file_path=config_file)
+    return backend
+
+
 def main():
 
     parser = argparse.ArgumentParser(
@@ -1071,7 +1088,7 @@ def main():
 
     sp = subparser.add_parser('pull', help='pull fatfiles from remote git-fat server')
     sp.add_argument("backend", nargs="?", help='pull using given backend')
-    sp.add_argument("--many-binaries", dest='many_binaries', action='store_true', 
+    sp.add_argument("--many-binaries", dest='many_binaries', action='store_true',
                     help='accelerate pulling a repository which contains many binaries')
     sp.add_argument("patterns", nargs="*", help='files or file patterns to pull')
     sp.set_defaults(func='pull')
@@ -1115,18 +1132,8 @@ def main():
         log_level = _logging.WARNING
     _configure_logging(log_level)
 
-    require_backend = ('pull', 'push')
-
     try:
-        backend_opt = kwargs.pop('backend', None)
-        config_file = kwargs.pop('config_file', None)
-        backend = None
-        if kwargs['func'] == 'pull':
-            if backend_opt and backend_opt not in BACKEND_MAP:
-                kwargs['patterns'].insert(0, backend_opt)
-                backend_opt = None
-        if kwargs['func'] in require_backend:
-            backend = _parse_config(backend=backend_opt, cfg_file_path=config_file)
+        backend = _load_backend(kwargs)  # load_backend mutates kwargs
         run(backend, **kwargs)
     except RuntimeError as err:
         logger.error(str(err))
