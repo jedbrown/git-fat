@@ -618,6 +618,8 @@ class GitFat(object):
         patterns = patterns or []
         # Null-terminated for proper file name handling (spaces)
         for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
+            if not os.path.exists(fname):
+                continue
             st = os.lstat(fname)
             if st.st_size != self._magiclen or os.path.islink(fname):
                 continue
