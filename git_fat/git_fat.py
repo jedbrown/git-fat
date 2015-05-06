@@ -72,6 +72,7 @@ def get_log_level(log_level_string):
 
 GIT_FAT_LOG_LEVEL = get_log_level(os.getenv("GIT_FAT_LOG_LEVEL", ""))
 GIT_FAT_LOG_FILE = os.getenv("GIT_FAT_LOG_FILE", "")
+GIT_SSH = os.getenv("GIT_SSH")
 
 
 def git(cliargs, *args, **kwargs):
@@ -279,16 +280,16 @@ class CopyBackend(BackendInterface):
         self.base_dir = base_dir
 
     def pull_files(self, file_list):
-
         for f in file_list:
             fullpath = os.path.join(self.other_path, f)
             shutil.copy2(fullpath, self.base_dir)
+        return True
 
     def push_files(self, file_list):
-
         for f in file_list:
             fullpath = os.path.join(self.base_dir, f)
             shutil.copy2(fullpath, self.other_path)
+        return True
 
 
 class HTTPBackend(BackendInterface):
@@ -342,8 +343,16 @@ class RSyncBackend(BackendInterface):
 
     def __init__(self, base_dir, **kwargs):
         remote_url = kwargs.get('remote')
-        ssh_user = kwargs.get('sshuser')
-        ssh_port = kwargs.get('sshport', '22')
+
+        # Allow support for rsyncd servers (Looks like "remote = example.org::mybins")
+        ssh_user = ''
+        ssh_port = ''
+        if "::" in remote_url:
+            self.is_rsyncd_remote = True
+        else:
+            self.is_rsyncd_remote = False
+            ssh_user = kwargs.get('sshuser')
+            ssh_port = kwargs.get('sshport', '22')
 
         if not remote_url:
             raise RuntimeError("No remote url configured for rsync")
@@ -352,6 +361,13 @@ class RSyncBackend(BackendInterface):
         self.ssh_user = ssh_user
         self.ssh_port = ssh_port
         self.base_dir = base_dir
+        # Swap Windows style drive letters (e.g. 't:') for cygwin style drive letters (e.g. '/t')
+        # Otherwise, when using an rsyncd remote (e.g. 'example.org::bin'),
+        # The rsync client on Windows will exit with this error:
+        # "The source and destination cannot both be remote."
+        # Presumably, this is because rsync assumes any path is remote if it contains a colon.
+        if platform.system() == 'Windows' and self.is_rsyncd_remote and self.base_dir.find(':') == 1:
+            self.base_dir = "/" + self.base_dir[0] + self.base_dir[2:]
 
     def _rsync(self, push):
         ''' Construct the rsync command '''
@@ -371,15 +387,23 @@ class RSyncBackend(BackendInterface):
 
         # extra must be passed in as single argv, which is why it's
         # not in the template and split isn't called on it
-        if platform.system() == "Windows":
+        if self.is_rsyncd_remote:
+            extra = ''
+        elif GIT_SSH:
+            extra = '--rsh={}'.format(GIT_SSH)
+        elif platform.system() == "Windows":
             extra = '--rsh=git-fat_ssh.exe'
         else:
             extra = '--rsh=ssh'
+
         if self.ssh_user:
             extra = ' '.join([extra, '-l {}'.format(self.ssh_user)])
         if self.ssh_port:
             extra = ' '.join([extra, '-p {}'.format(self.ssh_port)])
-        cmd.append(extra)
+
+        if extra:
+            cmd.append(extra)
+
         return cmd
 
     def pull_files(self, file_list):
@@ -562,7 +586,7 @@ class GitFat(object):
 
         revlist.wait()
 
-    def _managed_files(self):
+    def _managed_files(self, **unused_kwargs):
         revlistgen = self._rev_list()
         # Find any objects that are git-fat placeholders which are tracked in the repository
         managed = {}
@@ -594,6 +618,8 @@ class GitFat(object):
         patterns = patterns or []
         # Null-terminated for proper file name handling (spaces)
         for fname in sub.check_output(['git', 'ls-files', '-z'] + patterns).split('\x00')[:-1]:
+            if not os.path.exists(fname):
+                continue
             st = os.lstat(fname)
             if st.st_size != self._magiclen or os.path.islink(fname):
                 continue
@@ -795,6 +821,48 @@ class GitFat(object):
         for f in managed.keys():
             print(f, managed.get(f))
 
+    def _remove_orphan_file(self, fname):
+        # The output of our smudge filter depends on the existence of
+        # the file in .git/fat/objects, but git caches the file stat
+        # from the previous time the file was smudged, therefore it
+        # won't try to re-smudge. There's no git command to specifically
+        # invalidate the index cache so we have two options:
+        # Change the file stat mtime or change the file size. However, since
+        # the file mtime only has a granularity of 1s, if we're doing a pull
+        # right after a clone or checkout, it's possible that the modified
+        # time will be the same as in the index. Git knows this can happen
+        # so git checks the file size if the modified time is the same.
+        # The easiest way around this is just to remove the file we want
+        # to replace (since it's an orphan, it should be a placeholder)
+        with open(fname, 'rb') as f:
+            recheck_digest = self._get_digest(f)  # One last sanity check
+        if recheck_digest:
+            delete_file(fname)
+
+    def checkout_all_index(self, show_orphans=False, **unused_kwargs):
+        '''
+        Checkout all files from index when restoring many binaries, to enhance the performance.
+        Need the working directory to be clean.
+        '''
+        # avoid unstaged changed being overwritten
+        if sub.check_output(["git", "ls-files", "-m"]):
+            print('You have unstaged changes in working directory')
+            print('please use "git add <file>..." to stage those changes'
+                  ' or use "git checkout -- <file>..." to discard changes')
+            exit(1)
+
+        for digest, fname in self._orphan_files():
+            objpath = os.path.join(self.objdir, digest)
+            if os.access(objpath, os.R_OK):
+                print('Will restore %s -> %s' % (digest, fname))
+                self._remove_orphan_file(fname)
+            elif show_orphans:
+                print('Data unavailable: %s %s' % (digest, fname))
+
+        print('Restoring files ...')
+        # This re-smudge is essentially a copy that restores permissions.
+        sub.check_call(['git', 'checkout-index', '--index', '--force', '--all'])
+
     def checkout(self, show_orphans=False, **unused_kwargs):
         '''
         Update any stale files in the present working tree
@@ -803,22 +871,7 @@ class GitFat(object):
             objpath = os.path.join(self.objdir, digest)
             if os.access(objpath, os.R_OK):
                 print('Restoring %s -> %s' % (digest, fname))
-                # The output of our smudge filter depends on the existence of
-                # the file in .git/fat/objects, but git caches the file stat
-                # from the previous time the file was smudged, therefore it
-                # won't try to re-smudge. There's no git command to specifically
-                # invalidate the index cache so we have two options:
-                # Change the file stat mtime or change the file size. However, since
-                # the file mtime only has a granularity of 1s, if we're doing a pull
-                # right after a clone or checkout, it's possible that the modified
-                # time will be the same as in the index. Git knows this can happen
-                # so git checks the file size if the modified time is the same.
-                # The easiest way around this is just to remove the file we want
-                # to replace (since it's an orphan, it should be a placeholder)
-                with open(fname, 'rb') as f:
-                    recheck_digest = self._get_digest(f)  # One last sanity check
-                if recheck_digest:
-                    delete_file(fname)
+                self._remove_orphan_file(fname)
                 # This re-smudge is essentially a copy that restores permissions.
                 sub.check_call(['git', 'checkout-index', '--index', '--force', fname])
             elif show_orphans:
@@ -848,25 +901,29 @@ class GitFat(object):
         # File exists but is not a fatfile, don't add it
         return False
 
-    def pull(self, pattern=None, **kwargs):
+    def pull(self, patterns=None, **kwargs):
         """ Get orphans, call backend pull """
         cached_objs = self._cached_objects()
 
         # TODO: Why use _orphan _and_ _referenced here?
-        if pattern:
+        if patterns:
             # filter the working tree by a pattern
-            files = set(digest for digest, fname in self._orphan_files(patterns=(pattern,))) - cached_objs
+            files = set(digest for digest, fname in self._orphan_files(patterns=patterns)) - cached_objs
         else:
             # default pull any object referenced but not stored
             files = self._referenced_objects(**kwargs) - cached_objs
 
-        logger.debug("PULL: pattern={}, kwargs={}, len(files)={}"
-                     .format(pattern, kwargs, len(files)))
+        logger.debug("PULL: patterns={}, kwargs={}, len(files)={}"
+                     .format(patterns, kwargs, len(files)))
 
         if not self.backend.pull_files(files):
             sys.exit(1)
         # Make sure they're up to date
-        self.checkout()
+        if kwargs.pop("many_binaries", False):
+            print('in accelerating mode')
+            self.checkout_all_index()
+        else:
+            self.checkout()
 
     def push(self, unused_pattern=None, **kwargs):
         # We only want the intersection of the referenced files and ones we have cached
@@ -974,6 +1031,24 @@ def _configure_logging(log_level):
     logger.setLevel(log_level)
 
 
+def _load_backend(kwargs):
+    needs_backend = ('pull', 'push')
+    backend_opt = kwargs.pop('backend', None)
+    config_file = kwargs.pop('config_file', None)
+    backend = None
+    if kwargs['func'] == 'pull':
+        # since pull can be of the form pull [backend] [patterns], we need to check
+        # the first argument and insert into file patterns if it's not a backend
+        # this means you can't use a file pattern which is an exact match with
+        # a backend name (e.g. you can't have a file named copy, rsync, http, etc)
+        if backend_opt and backend_opt not in BACKEND_MAP:
+            kwargs['patterns'].insert(0, backend_opt)
+            backend_opt = None
+    if kwargs['func'] in needs_backend:
+        backend = _parse_config(backend=backend_opt, cfg_file_path=config_file)
+    return backend
+
+
 def main():
 
     parser = argparse.ArgumentParser(
@@ -1015,6 +1090,9 @@ def main():
 
     sp = subparser.add_parser('pull', help='pull fatfiles from remote git-fat server')
     sp.add_argument("backend", nargs="?", help='pull using given backend')
+    sp.add_argument("--many-binaries", dest='many_binaries', action='store_true',
+                    help='accelerate pulling a repository which contains many binaries')
+    sp.add_argument("patterns", nargs="*", help='files or file patterns to pull')
     sp.set_defaults(func='pull')
 
     sp = subparser.add_parser('checkout', help='resmudge all orphan objects')
@@ -1056,14 +1134,8 @@ def main():
         log_level = _logging.WARNING
     _configure_logging(log_level)
 
-    require_backend = ('pull', 'push')
-
     try:
-        backend_opt = kwargs.pop('backend', None)
-        config_file = kwargs.pop('config_file', None)
-        backend = None
-        if kwargs['func'] in require_backend:
-            backend = _parse_config(backend=backend_opt, cfg_file_path=config_file)
+        backend = _load_backend(kwargs)  # load_backend mutates kwargs
         run(backend, **kwargs)
     except RuntimeError as err:
         logger.error(str(err))
