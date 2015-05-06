@@ -839,43 +839,21 @@ class GitFat(object):
         if recheck_digest:
             delete_file(fname)
 
-    def checkout_all_index(self, show_orphans=False, **unused_kwargs):
-        '''
-        Checkout all files from index when restoring many binaries, to enhance the performance.
-        Need the working directory to be clean.
-        '''
-        # avoid unstaged changed being overwritten
-        if sub.check_output(["git", "ls-files", "-m"]):
-            print('You have unstaged changes in working directory')
-            print('please use "git add <file>..." to stage those changes'
-                  ' or use "git checkout -- <file>..." to discard changes')
-            exit(1)
-
-        for digest, fname in self._orphan_files():
-            objpath = os.path.join(self.objdir, digest)
-            if os.access(objpath, os.R_OK):
-                print('Will restore %s -> %s' % (digest, fname))
-                self._remove_orphan_file(fname)
-            elif show_orphans:
-                print('Data unavailable: %s %s' % (digest, fname))
-
-        print('Restoring files ...')
-        # This re-smudge is essentially a copy that restores permissions.
-        sub.check_call(['git', 'checkout-index', '--index', '--force', '--all'])
-
     def checkout(self, show_orphans=False, **unused_kwargs):
         '''
         Update any stale files in the present working tree
         '''
+        to_checkout = []
         for digest, fname in self._orphan_files():
             objpath = os.path.join(self.objdir, digest)
             if os.access(objpath, os.R_OK):
                 print('Restoring %s -> %s' % (digest, fname))
                 self._remove_orphan_file(fname)
                 # This re-smudge is essentially a copy that restores permissions.
-                sub.check_call(['git', 'checkout-index', '--index', '--force', fname])
+                to_checkout.append(fname)
             elif show_orphans:
                 print('Data unavailable: %s %s' % (digest, fname))
+        sub.check_call(['git', 'checkout-index', '--index', '--force'] + to_checkout)
 
     def can_clean_file(self, filename):
         '''
@@ -918,12 +896,7 @@ class GitFat(object):
 
         if not self.backend.pull_files(files):
             sys.exit(1)
-        # Make sure they're up to date
-        if kwargs.pop("many_binaries", False):
-            print('in accelerating mode')
-            self.checkout_all_index()
-        else:
-            self.checkout()
+        self.checkout()
 
     def push(self, unused_pattern=None, **kwargs):
         # We only want the intersection of the referenced files and ones we have cached
@@ -1090,8 +1063,6 @@ def main():
 
     sp = subparser.add_parser('pull', help='pull fatfiles from remote git-fat server')
     sp.add_argument("backend", nargs="?", help='pull using given backend')
-    sp.add_argument("--many-binaries", dest='many_binaries', action='store_true',
-                    help='accelerate pulling a repository which contains many binaries')
     sp.add_argument("patterns", nargs="*", help='files or file patterns to pull')
     sp.set_defaults(func='pull')
 
