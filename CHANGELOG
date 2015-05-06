@@ -105,3 +105,18 @@ BUGFIXES
 FEATURES
 
 - Windows Support.  Thanks @CzarekTomczak!
+
+0.5.0
+-----
+
+BUGFIXES
+
+- Don't throw stacktrace when file is missing
+- Return success for copy backend when pulling
+
+FEATURES
+
+- Support partial pulls
+- Respect GIT_SSH environment variable
+- Improve the performance when pulling large amount of binaries
+- Add support for rsyncd shares to the rsync backend
