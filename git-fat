@@ -125,7 +125,8 @@ def gitconfig_set(name, value, file=None):
 class GitFat(object):
     DecodeError = RuntimeError
     def __init__(self):
-        self.verbose = verbose_stderr if os.environ.get('GIT_FAT_VERBOSE') else verbose_ignore
+        self.is_verbose = os.environ.get('GIT_FAT_VERBOSE')
+        self.verbose = verbose_stderr if self.is_verbose else verbose_ignore
         try:
             self.gitroot = subprocess.check_output('git rev-parse --show-toplevel'.split()).strip()
         except subprocess.CalledProcessError:
@@ -422,8 +423,13 @@ class GitFat(object):
 
         filenames_str = "\n".join(filenames_to_restore) + "\n"
 
-        print('Restoring %d Files' % (len(filenames_to_restore),))
-        self.verbose(filenames_str)
+        if not self.is_verbose:
+            print('Restoring %d Files' % (len(filenames_to_restore),))
+        else:
+            print('Restoring %d Files:' % (len(filenames_to_restore),))
+            for digest, fname, accessible in orphan_files_is_accessible:
+                if accessible:
+                    print('%s: %s' % (digest, fname))
 
         if filenames_to_restore:
             # This re-smudge is essentially a copy that restores permissions.
