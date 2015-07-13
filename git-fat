@@ -403,21 +403,38 @@ class GitFat(object):
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
         self.assert_init_done()
-        for digest, fname in self.orphan_files():
-            objpath = os.path.join(self.objdir, digest)
-            if os.access(objpath, os.R_OK):
-                print('Restoring %s -> %s' % (digest, fname))
-                # The output of our smudge filter depends on the existence of
-                # the file in .git/fat/objects, but git caches the file stat
-                # from the previous time the file was smudged, therefore it
-                # won't try to re-smudge. I don't know a git command that
-                # specifically invalidates that cache, but touching the file
-                # also does the trick.
-                os.utime(fname, None)
-                # This re-smudge is essentially a copy that restores permissions.
-                subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname])
-            elif show_orphans:
-                print('Data unavailable: %s %s' % (digest,fname))
+        orphan_files_is_accessible = [(digest, fname, os.access(os.path.join(self.objdir, digest), os.R_OK)) for digest, fname in self.orphan_files()]
+        filenames_to_restore = [fname for digest, fname, accessible in orphan_files_is_accessible if accessible]
+
+        for fname in filenames_to_restore:
+            # The output of our smudge filter depends on the existence of
+            # the file in .git/fat/objects, but git caches the file stat
+            # from the previous time the file was smudged, therefore it
+            # won't try to re-smudge. I don't know a git command that
+            # specifically invalidates that cache, but touching the file
+            # also does the trick.
+            os.utime(fname, None)
+
+        if show_orphans:
+            for digest, fname, accessible in orphan_files_is_accessible:
+                if not accessible:
+                    print('Data unavailable: %s %s' % (digest,fname))
+
+        filenames_str = "\n".join(filenames_to_restore) + "\n"
+
+        print('Restoring %d Files' % (len(filenames_to_restore),))
+        self.verbose(filenames_str)
+
+        if filenames_to_restore:
+            # This re-smudge is essentially a copy that restores permissions.
+            cmd = ['git', 'checkout-index', '--stdin', '--index', '--force']
+            p = subprocess.Popen(cmd, stdin = subprocess.PIPE)
+            p.communicate(filenames_str)
+            retcode = p.wait()
+            if retcode != 0:
+                error = subprocess.CalledProcessError(retcode, " ".join(cmd))
+                raise error
+
     def cmd_pull(self, args):
         'Pull anything that I have referenced, but not stored'
         self.setup()
