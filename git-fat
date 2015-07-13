@@ -421,7 +421,7 @@ class GitFat(object):
                 if not accessible:
                     print('Data unavailable: %s %s' % (digest,fname))
 
-        filenames_str = "\n".join(filenames_to_restore) + "\n"
+        filenames_nullterm = "\x00".join(filenames_to_restore)
 
         if not self.is_verbose:
             print('Restoring %d Files' % (len(filenames_to_restore),))
@@ -433,9 +433,9 @@ class GitFat(object):
 
         if filenames_to_restore:
             # This re-smudge is essentially a copy that restores permissions.
-            cmd = ['git', 'checkout-index', '--stdin', '--index', '--force']
+            cmd = ['git', 'checkout-index', '--stdin', '-z', '--index', '--force']
             p = subprocess.Popen(cmd, stdin = subprocess.PIPE)
-            p.communicate(filenames_str)
+            p.communicate(filenames_nullterm)
             retcode = p.wait()
             if retcode != 0:
                 error = subprocess.CalledProcessError(retcode, " ".join(cmd))
