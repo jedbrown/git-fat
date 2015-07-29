@@ -44,6 +44,14 @@ except ImportError:
         return output
     subprocess.check_output = backport_check_output
 
+has_boto = False
+try:
+    from boto.s3.connection import S3Connection
+    from boto.s3.key import Key
+    has_boto = True
+except ImportError:
+    pass
+
 BLOCK_SIZE = 4096
 
 def verbose_stderr(*args, **kwargs):
@@ -107,7 +115,8 @@ def gitconfig_get(name, file=None):
     if file is not None:
         args += ['--file', file]
     args.append(name)
-    p = subprocess.Popen(args, stdout=subprocess.PIPE)
+    with open(os.devnull, 'w') as devnull:
+        p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=devnull)
     output = p.communicate()[0].strip()
     if p.returncode and file is None:
         return None
@@ -122,6 +131,73 @@ def gitconfig_set(name, value, file=None):
     args += [name, value]
     p = subprocess.check_call(args)
 
+# Interface
+class Storage(object):
+    def put(self, files, source):
+        raise NotImplementedError
+    def get(self, files, destination):
+        raise NotImplementedError
+
+class RsyncStorage(Storage):
+    def __init__(self, cfgpath):
+        self.remote    = gitconfig_get('rsync.remote', file=cfgpath)
+        self.ssh_port  = gitconfig_get('rsync.sshport', file=cfgpath)
+        self.ssh_user  = gitconfig_get('rsync.sshuser', file=cfgpath)
+        self.options   = gitconfig_get('rsync.options', file=cfgpath)
+        if self.remote is None:
+            raise RuntimeError('No rsync.remote in %s' % cfgpath)
+    def get(self, files, destination):
+        cmd = self.get_rsync_command(self.remote, destination)
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        p.communicate(input='\x00'.join(files))
+        if p.returncode:
+            raise RuntimeError('rsync exited with code %d' % p.returncode)
+    def put(self, files, source):
+        cmd = self.get_rsync_command(source, self.remote)
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        p.communicate(input='\x00'.join(files))
+        if p.returncode:
+            raise RuntimeError('rsync exited with code %d' % p.returncode)
+    def get_rsync_command(self, source, dest):
+        cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-']
+        rshopts = ''
+        if self.ssh_user:
+            rshopts += ' -l ' + self.ssh_user
+        if self.ssh_port:
+            rshopts += ' -p ' + self.ssh_port
+        if rshopts:
+            cmd.append('--rsh=ssh' + rshopts)
+        if self.options:
+            cmd += self.options.split(' ')
+        cmd += [source + '/', self.remote + '/']
+        return cmd
+
+class BotoStorage(Storage):
+    def __init__(self, cfgpath):
+        # These can all be None, and boto will preset them from the environment.
+        self.host = gitconfig_get('boto.host', file=cfgpath)
+        self.bucket_name = gitconfig_get('boto.bucket', file=cfgpath)
+        self.access_key = gitconfig_get('boto.access_key', file=cfgpath)
+        self.secret_key = gitconfig_get('boto.secret_key', file=cfgpath)
+        self.connection = S3Connection(
+            aws_access_key_id=self.access_key,
+            aws_secret_access_key=self.secret_key,
+            host=self.host)
+        self.bucket = self.connection.get_bucket(self.bucket_name)
+    def put(self, files, source):
+        for f in files:
+            k = self.bucket.get_key(f)
+            if k is None:
+                k = Key(bucket=self.bucket, name=f)
+                k.set_contents_from_filename(os.path.join(source, f))
+    def get(self, files, destination):
+        for f in files:
+            k = self.bucket.get_key(f)
+            dest = os.path.join(destination, f)
+            # TODO(joshk): Validate the SHA1 of the filename matches filename.
+            if not os.path.exists(dest):
+                k.get_contents_to_filename(dest)
+
 class GitFat(object):
     DecodeError = RuntimeError
     def __init__(self):
@@ -132,6 +208,8 @@ class GitFat(object):
             sys.exit(1)
         self.gitdir = subprocess.check_output('git rev-parse --git-dir'.split()).strip()
         self.objdir = os.path.join(self.gitdir, 'fat', 'objects')
+        gitfat_file = os.path.join(self.gitroot,'.gitfat')
+        self.storage = self.get_storage_class(gitfat_file)(gitfat_file)
         if os.environ.get('GIT_FAT_VERSION') == '1':
             self.encode = self.encode_v1
         else:
@@ -140,46 +218,25 @@ class GitFat(object):
             return len(enc(hashlib.sha1('dummy').hexdigest(), 5))
         self.magiclen = magiclen(self.encode) # Current version
         self.magiclens = [magiclen(enc) for enc in [self.encode_v1, self.encode_v2]] # All prior versions
+    @staticmethod
+    def get_storage_class(gitfat_file):
+        backends = {'rsync': RsyncStorage}
+        if has_boto:
+            backends['boto'] = BotoStorage
+        backend_value = gitconfig_get('git-fat.storage', file=gitfat_file) or 'rsync'
+        if backend_value not in backends:
+            print('Warning: Missing extra package for "%s" storage support.' % backend_value)
+        return backends[backend_value]
     def setup(self):
         mkdir_p(self.objdir)
-    def is_init_done(self):
+    @staticmethod
+    def is_init_done():
         return gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge')
     def assert_init_done(self):
         if not self.is_init_done():
             sys.stderr.write('fatal: git-fat is not yet configured in this repository.\n')
             sys.stderr.write('Run "git fat init" to configure.\n')
             sys.exit(1)
-    def get_rsync(self):
-        cfgpath   = os.path.join(self.gitroot,'.gitfat')
-        remote    = gitconfig_get('rsync.remote', file=cfgpath)
-        ssh_port  = gitconfig_get('rsync.sshport', file=cfgpath)
-        ssh_user  = gitconfig_get('rsync.sshuser', file=cfgpath)
-        options   = gitconfig_get('rsync.options', file=cfgpath)
-        if remote is None:
-            raise RuntimeError('No rsync.remote in %s' % cfgpath)
-        return remote, ssh_port, ssh_user, options
-    def get_rsync_command(self,push):
-        (remote, ssh_port, ssh_user, options) = self.get_rsync()
-        if push:
-            self.verbose('Pushing to %s' % (remote))
-        else:
-            self.verbose('Pulling from %s' % (remote))
-
-        cmd = ['rsync', '--progress', '--ignore-existing', '--from0', '--files-from=-']
-        rshopts = ''
-        if ssh_user:
-            rshopts += ' -l ' + ssh_user
-        if ssh_port:
-            rshopts += ' -p ' + ssh_port
-        if rshopts:
-            cmd.append('--rsh=ssh' + rshopts)
-        if options:
-            cmd += options.split(' ')
-        if push:
-            cmd += [self.objdir + '/', remote + '/']
-        else:
-            cmd += [remote + '/', self.objdir + '/']
-        return cmd
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
     def encode_v1(self, digest, bytes):
@@ -394,12 +451,7 @@ class GitFat(object):
         # (includes history). Finer-grained pushing would be useful.
         pushall = '--all' in args
         files = self.referenced_objects(all=pushall) & self.catalog_objects()
-        cmd = self.get_rsync_command(push=True)
-        self.verbose('Executing: %s' % ' '.join(cmd))
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input='\x00'.join(files))
-        if p.returncode:
-            sys.exit(p.returncode)
+        self.storage.put(files, self.objdir)
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
         self.assert_init_done()
@@ -431,12 +483,7 @@ class GitFat(object):
             if rev:
                 refargs['rev'] = rev
         files = self.filter_objects(refargs, self.parse_pull_patterns(args))
-        cmd = self.get_rsync_command(push=False)
-        self.verbose('Executing: %s' % ' '.join(cmd))
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input='\x00'.join(files))
-        if p.returncode:
-            sys.exit(p.returncode)
+        self.storage.get(files, self.objdir)
         self.checkout()
 
     def parse_pull_patterns(self, args):
