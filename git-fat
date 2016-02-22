@@ -293,8 +293,10 @@ class GitFat(object):
         else:                             # We have an iterable over the original input.
             self.verbose('git-fat filter-smudge: not a managed file')
             cat_iter(result, sys.stdout)
+
     def catalog_objects(self):
         return set(os.listdir(self.objdir))
+
     def referenced_objects(self, rev=None, all=False):
         referenced = set()
         if all:
@@ -418,19 +420,29 @@ class GitFat(object):
                 subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname])
             elif show_orphans:
                 print('Data unavailable: %s %s' % (digest,fname))
+
     def cmd_pull(self, args):
         'Pull anything that I have referenced, but not stored'
         self.setup()
         refargs = dict()
+        files = list()
+        if not args:
+            print('use the "--all" flag to pull everything or specify files and directories')
+            return
         if '--all' in args:
             refargs['all'] = True
         for arg in args:
-            if arg.startswith('-') or len(arg) != 40:
-                continue
-            rev = self.revparse(arg)
-            if rev:
-                refargs['rev'] = rev
-        files = self.filter_objects(refargs, self.parse_pull_patterns(args))
+            if not(arg.startswith('-')) and len(arg) == 40 or refargs.get('all'):
+                rev = self.revparse(arg)
+                if rev:
+                    refargs['rev'] = rev
+                files = self.filter_objects(refargs, self.parse_pull_patterns(args))
+                break
+            else:
+                files.extend(self.get_target_files(arg))
+        if not files:
+            print('No git-fat hashed files found. Perhaps they have already been pulled?')
+            return
         cmd = self.get_rsync_command(push=False)
         self.verbose('Executing: %s' % ' '.join(cmd))
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -439,6 +451,44 @@ class GitFat(object):
             sys.exit(p.returncode)
         self.checkout()
 
+    def get_target_files(self, arg):
+        files = list()
+        if os.path.isdir(arg):
+           #recursive test
+           for (dirpath, dirnames, filenames) in os.walk(arg, topdown=True):
+               for d in dirnames:
+                   newdir = os.path.join(dirpath, d)
+                   files.extend(self.get_target_files(newdir))
+               for f in filenames:
+                   f = os.path.join(dirpath,f)
+                   f_hash = self.get_file_hash(f)
+                   if f_hash: files.append(f_hash)
+        else:
+            f_hash = self.get_file_hash(arg)
+            if f_hash: files.append(f_hash)
+        return files
+
+    def get_file_hash(self, fname):
+        #fname is a string with the path to desired file or directory
+	found_file = os.path.isfile(fname)
+        if not found_file:
+            print(fname)
+            sys.exit("File not found, try giving an explicit path")
+        if found_file:
+            #check if file is a git-fat file by testing its size, should be 74bytes
+            f_size = os.path.getsize(fname)
+            if f_size == 74:
+                f = open(fname, 'r')
+                fat_header = f.readline()
+                if 'git-fat' not in fat_header:
+                    print('Skipping %s as it is not a git-fat hashed file, perhaps it has already been pulled?'%(fname))
+                    return
+                else:
+                    #grab hash from file
+                    f_hash = self.decode(fat_header)
+                    return f_hash[0]
+        return None
+ 
     def parse_pull_patterns(self, args):
         if '--' not in args:
             return ['']
