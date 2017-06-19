@@ -242,7 +242,6 @@ class GitFat(object):
             cached = False                # changes to True when file is cached
             with os.fdopen(fd, 'w') as cache:
                 outstream = cache
-                blockiter = readblocks(instream)
                 firstblock = True
                 for block in readblocks(instream):
                     if firstblock:
