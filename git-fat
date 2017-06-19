@@ -20,6 +20,11 @@ if not type(sys.version_info) is tuple and sys.version_info.major > 2:
     sys.exit(1)
 
 try:
+    integer = long
+except NameError:               # Python-3 int behaves like Python-2 long
+    integer = int
+
+try:
     from subprocess import check_output
     del check_output
 except ImportError:
@@ -193,7 +198,7 @@ class GitFat(object):
         if string.startswith(cookie):
             parts = string[len(cookie):].split()
             digest = parts[0]
-            bytes = int(parts[1]) if len(parts) > 1 else None
+            bytes = integer(parts[1]) if len(parts) > 1 else None
             return digest, bytes
         elif noraise:
             return None, None
@@ -235,7 +240,7 @@ class GitFat(object):
         return digest
     def filter_clean(self, instream, outstreamclean):
         h = hashlib.new('sha1')
-        bytes = 0
+        bytes = integer(0)
         fd, tmpname = tempfile.mkstemp(dir=self.objdir)
         try:
             ishanging = False
@@ -311,7 +316,7 @@ class GitFat(object):
         def filter_gitfat_candidates(input, output):
             for line in input:
                 objhash, objtype, size = line.split()
-                if objtype == 'blob' and int(size) in self.magiclens:
+                if objtype == 'blob' and integer(size) in self.magiclens:
                     output.write(objhash + '\n')
             output.close()
         # ...`cat-file --batch` provides full contents of git-fat candidates in bulk
@@ -327,7 +332,7 @@ class GitFat(object):
             if not metadata_line:
                 break  # EOF
             objhash, objtype, size_str = metadata_line.split()
-            size, bytes_read = int(size_str), 0
+            size, bytes_read = integer(size_str), 0
             # We know from filter that item is a candidate git-fat object and
             # is small enough to read into memory and process
             content = ''
@@ -510,7 +515,7 @@ class GitFat(object):
             objhash, blob, size = line.split()
             if blob != 'blob':
                 continue
-            size = int(size)
+            size = integer(size)
             numblobs += 1
             if size > threshsize:
                 numlarge += 1
@@ -521,7 +526,7 @@ class GitFat(object):
         time1 = time.time()
         self.verbose('%d of %d blobs are >= %d bytes [elapsed %.3fs]' % (numlarge, numblobs, threshsize, time1-time0))
     def cmd_find(self, args):
-        maxsize = int(args[0])
+        maxsize = integer(args[0])
         blobsizes = dict(self.gen_large_blobs('--all', maxsize))
         time0 = time.time()
         # Find all names assumed by large blobs (those in blobsizes)
