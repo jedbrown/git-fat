@@ -412,11 +412,18 @@ class GitFat(object):
                 # the file in .git/fat/objects, but git caches the file stat
                 # from the previous time the file was smudged, therefore it
                 # won't try to re-smudge. I don't know a git command that
-                # specifically invalidates that cache, but touching the file
-                # also does the trick.
-                os.utime(fname, None)
-                # This re-smudge is essentially a copy that restores permissions.
-                subprocess.check_call(['git', 'checkout-index', '--index', '--force', fname])
+                # specifically invalidates that cache, but changing the mtime
+                # on the file will invalidate the cache.
+                # Here we set the mtime to mtime + 1. This is an improvement
+                # over touching the file as it catches the edgecase where a
+                # git-checkout happens within the same second as a git fat
+                # checkout.
+                stat = os.lstat(fname)
+                os.utime(fname, (stat.st_atime, stat.st_mtime + 1))
+                # This re-smudge is essentially a copy that restores
+                # permissions.
+                subprocess.check_call(
+                    ['git', 'checkout-index', '--index', '--force', fname])
             elif show_orphans:
                 print('Data unavailable: %s %s' % (digest,fname))
     def cmd_pull(self, args):
