@@ -158,7 +158,40 @@ class GitFat(object):
         if remote is None:
             raise RuntimeError('No rsync.remote in %s' % cfgpath)
         return remote, ssh_port, ssh_user, options
+
+    def get_aws_cmd(self, push, s3_bucket):
+        if not os.path.exists('/usr/local/bin/aws'):
+            sys.stderr.write('Could not find aws cli install. Please pip install awscli and tghen aws configure.\n')
+            sys.exit(1)
+
+        if not s3_bucket.startswith('s3://'):
+            s3_bucket = "s3://{}".format(s3_bucket)
+
+        if push:
+            cmd = [
+                "aws",
+                "s3",
+                "sync",
+                self.objdir + "/",
+                s3_bucket + "/"
+            ]
+        else:
+            cmd = [
+                "aws",
+                "s3",
+                "sync",
+                s3_bucket + "/",
+                self.objdir + "/"
+            ]
+        return cmd
+
+
+
     def get_rsync_command(self,push):
+        cfgpath = os.path.join(self.gitroot,'.gitfat')
+        s3_bucket = gitconfig_get('s3.bucket', file=cfgpath)
+        if s3_bucket:
+            return self.get_aws_cmd(push, s3_bucket)
         (remote, ssh_port, ssh_user, options) = self.get_rsync()
         if push:
             self.verbose('Pushing to %s' % (remote))
