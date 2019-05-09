@@ -39,17 +39,22 @@ Set a remote store for the fat objects by editing `.gitfat`.
 
 This file should typically be committed to the repository so that others
 will automatically have their remote set. This remote address can use
-any protocol supported by rsync. 
+any protocol supported by rsync.
 
-Most users will configure it to use remote ssh in a directory with shared 
-access. To do this, set the `sshuser` and `sshport` variables in `.gitfat` 
+Most users will configure it to use remote ssh in a directory with shared
+access. To do this, set the `sshuser` and `sshport` variables in `.gitfat`
 configuration file. For example, to use rsync with ssh, with the default
-port (22) and authenticate with the user "_fat_", your configuration would 
-look like this: 
+port (22) and authenticate with the user "_fat_", your configuration would
+look like this:
 
     [rsync]
     remote = your.remote-host.org:/share/fat-store
     sshuser = fat
+
+To use an Amazon S3 bucket as the backend, you should first install the AWS CLI and configure it with a user that has access to the bucket. Your configuration would then look like:
+
+    [s3]
+    bucket = se://your-s3-bucket
 
 # A worked example
 
@@ -145,7 +150,7 @@ selected history.
     1 file to consider
     1f218834a137f7b185b498924e7a030008aee2ae
             6449 100%    6.15MB/s    0:00:00 (xfer#1, to-check=0/1)
-    
+
     sent 30 bytes  received 6558 bytes  4392.00 bytes/sec
     total size is 6449  speedup is 0.98
     Restoring 1f218834a137f7b185b498924e7a030008aee2ae -> master.tar.gz
