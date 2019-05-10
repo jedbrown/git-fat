@@ -54,7 +54,7 @@ look like this:
 To use an Amazon S3 bucket as the backend, you should first install the AWS CLI and configure it with a user that has access to the bucket. Your configuration would then look like:
 
     [s3]
-    bucket = se://your-s3-bucket
+    bucket = s3://your-s3-bucket
 
 # A worked example
 
