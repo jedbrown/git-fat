@@ -185,6 +185,7 @@ class GitFat(object):
             s3_bucket = "s3://{}".format(s3_bucket)
 
         if push:
+            self.verbose('Pushing to %s' % (s3_bucket))
             cmd = [
                 "aws",
                 "s3",
@@ -193,6 +194,7 @@ class GitFat(object):
                 s3_bucket + "/"
             ]
         else:
+            self.verbose('Pulling from %s' % (s3_bucket))
             cmd = [
                 "aws",
                 "s3",
