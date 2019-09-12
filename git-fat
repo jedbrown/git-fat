@@ -208,7 +208,7 @@ class GitFat(object):
             digest, bytes = self.decode_stream(open(fname))
         except IOError:
             return False, None
-        if isinstance(digest, str):
+        if isinstance(digest, (str,unicode)):
             return digest, bytes
         else:
             return None, bytes
@@ -269,7 +269,7 @@ class GitFat(object):
     def cmd_filter_smudge(self):
         self.setup()
         result, bytes = self.decode_stream(sys.stdin)
-        if isinstance(result, str):       # We got a digest
+        if isinstance(result, (str,unicode)):       # We got a digest
             objfile = os.path.join(self.objdir, result)
             try:
                 cat(open(objfile), sys.stdout)
