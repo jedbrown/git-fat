@@ -59,6 +59,7 @@ for ver in vers:
     pathline = 'export PATH=%s:$PATH\n' % testdir
     
     testfile = os.path.join(testdir,'test%s.sh' % ver)
+    testfileR = os.path.join(testdir,'test-retroactive%s.sh' % ver)
     fatfile = os.path.join(testdir,'git-fat')
     
     # Write the files. Do not use multiple with's to support 2.6
@@ -73,9 +74,16 @@ for ver in vers:
             outfile.write(infile.readline()) # copy shebang
             outfile.write(pathline)
             outfile.write(infile.read())
+
+    with open('test-retroactive.sh','rt') as infile:
+        with open(testfileR,'wt') as outfile:
+            outfile.write(infile.readline()) # copy shebang
+            outfile.write(pathline)
+            outfile.write(infile.read())
         
     os.chmod(fatfile, 509)
     os.chmod(testfile, 509)
+    os.chmod(testfileR, 509)
     
     try:
         subprocess.check_call(['./test%s.sh' % ver],cwd=testdir)
@@ -85,7 +93,17 @@ for ver in vers:
         print('FAILED python %s'%ver,file=sys.stderr)
         sys.exit(1)
     
-
+    print('###################')
+    print('###### RETRO ######')
+    print('###################')
+    
+    try:
+        subprocess.check_call(['./test-retroactive%s.sh' % ver],cwd=testdir)
+    except subprocess.CalledProcessError as err:
+        print('F'*60)
+        print(err,file=sys.stderr)
+        print('FAILED RETRO python %s'%ver,file=sys.stderr)
+        sys.exit(1)
 
 
 

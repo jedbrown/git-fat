@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 # -*- mode:python -*-
 
 from __future__ import print_function,unicode_literals
@@ -522,7 +522,7 @@ class GitFat(object):
             This truncates to one hash per line.
             """
             for line in input:
-                output.write(line[:40] + '\n')
+                output.write(line[:40] + b'\n')
             output.close()
         revlist = subprocess.Popen(['git', 'rev-list', '--all', '--objects'], stdout=subprocess.PIPE, bufsize=-1)
         objcheck = subprocess.Popen(['git', 'cat-file', '--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=-1)
@@ -570,6 +570,7 @@ class GitFat(object):
         lsfiles = subprocess.Popen(['git', 'ls-files', '-s'], stdout=subprocess.PIPE)
         updateindex = subprocess.Popen(['git', 'update-index', '--index-info'], stdin=subprocess.PIPE)
         for line in lsfiles.stdout:
+            line = uni(line)
             mode, sep, tail = line.partition(' ')
             blobhash, sep, tail = tail.partition(' ')
             stageno, sep, tail = tail.partition('\t')
@@ -607,8 +608,8 @@ class GitFat(object):
                 gitattributes_lines = []
             gitattributes_extra = ['%s filter=fat -text' % line.split()[0] for line in filelist]
             hashobject = subprocess.Popen(['git', 'hash-object', '-w', '--stdin'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-            stdout, stderr = hashobject.communicate('\n'.join(gitattributes_lines + gitattributes_extra) + '\n')
-            updateindex.stdin.write('%s %s %s\t%s\n' % (mode, stdout.strip(), stageno, '.gitattributes'))
+            stdout, stderr = hashobject.communicate(b'\n'.join(gitattributes_lines + gitattributes_extra) + b'\n')
+            updateindex.stdin.write( ('%s %s %s\t%s\n' % (mode, stdout.strip(), stageno, '.gitattributes')).encode('utf8'))
         updateindex.stdin.close()
         lsfiles.wait()
         updateindex.wait()
