@@ -19,7 +19,9 @@ git commit -m'Initial fat repository'
 ln -s /oe/dss-oe/dss-add-ons-testing-build/deploy/licenses/common-licenses/GPL-3 c
 git add c
 git commit -m'add broken symlink'
-echo 'fat content a' > a.fat
+#echo 'fat content a' > a.fat
+# Encode random bytes so it can't be interpreted as a string
+echo "AEi2RiChMJ+N0hR+AJs89QDmu4D3kaKDnmlgy0YJqm8A"|base64 --decode > a.fat
 git add a.fat
 git commit -m'add a.fat'
 echo 'fat content b' > b.fat
