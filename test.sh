@@ -27,10 +27,10 @@ git commit -m'add a.fat'
 echo 'fat content b' > b.fat
 git add b.fat
 git commit -m'add b.fat'
-echo 'revise fat content a' > a.fat
+#echo 'revise fat content a' > a.fat
+echo "AEmBARZ2es0t0mPeXOLAjQCd4QlgPiKFJz9rPqqBiGQA"|base64 --decode > a.fat
 git commit -am'revise a.fat'
 git fat push
-
 cd ..
 git clone fat-test fat-test2
 cd fat-test2
@@ -49,7 +49,11 @@ then
 fi
 git fat init
 git fat pull -- 'a.fa*'
-cat a.fat
+t=$(cat a.fat | base64 )
+if [ "$t" != "AEmBARZ2es0t0mPeXOLAjQCd4QlgPiKFJz9rPqqBiGQA" ]; then
+    echo 'ERROR: "git fat pull" did not return binary file'
+    exit 1
+fi
 echo 'file which is committed and removed afterwards' > d
 git add d
 git commit -m'add d with normal content'
