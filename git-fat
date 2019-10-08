@@ -315,7 +315,7 @@ class GitFat(object):
                 self.verbose('git-fat filter-smudge: restoring from %s' % objfile)
             except IOError:                 # file not found
                 self.verbose('git-fat filter-smudge: fat object missing %s' % objfile)
-                stdout.write(self.encode(result, bytes))   # could leave a better notice about how to recover this file
+                stdout.write(tobytes(self.encode(result, bytes)))   # could leave a better notice about how to recover this file
         else:                             # We have an iterable over the original input.
             self.verbose('git-fat filter-smudge: not a managed file')
             cat_iter(result, stdout)
