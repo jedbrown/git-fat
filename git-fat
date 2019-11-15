@@ -176,39 +176,43 @@ class GitFat(object):
             raise RuntimeError('No rsync.remote in %s' % cfgpath)
         return remote, ssh_port, ssh_user, options
 
-    def get_aws_cmd(self, push, s3_bucket):
+    def get_aws_cmd(self, push, s3_bucket, files):
         if not which('aws'):
             sys.stderr.write('Could not find aws cli install.\n')
             sys.exit(1)
 
         if not s3_bucket.startswith('s3://'):
             s3_bucket = "s3://{}".format(s3_bucket)
-
+        cmds = []
         if push:
             self.verbose('Pushing to %s' % (s3_bucket))
-            cmd = [
-                "aws",
-                "s3",
-                "cp",
-                self.objdir + "/",
-                s3_bucket + "/"
-            ]
+            for file in files:
+                cmd = [
+                    "aws",
+                    "s3",
+                    "cp",
+                    self.objdir + "/" + file,
+                    s3_bucket + "/" + file
+                ]
+                cmds.append(cmd)
         else:
             self.verbose('Pulling from %s' % (s3_bucket))
-            cmd = [
-                "aws",
-                "s3",
-                "cp",
-                s3_bucket + "/",
-                self.objdir + "/"
-            ]
-        return cmd
+            for file in files:
+                cmd = [
+                    "aws",
+                    "s3",
+                    "cp",
+                    s3_bucket + "/" + file,
+                    self.objdir + "/" + file
+                ]
+                cmds.append(cmd)
+        return cmds
 
-    def get_rsync_command(self,push):
+    def get_rsync_command(self,push,files):
         cfgpath = os.path.join(self.gitroot,'.gitfat')
         s3_bucket = gitconfig_get('s3.bucket', file=cfgpath)
         if s3_bucket:
-            return self.get_aws_cmd(push, s3_bucket)
+            return self.get_aws_cmd(push, s3_bucket, files)
         (remote, ssh_port, ssh_user, options) = self.get_rsync()
         if push:
             self.verbose('Pushing to %s' % (remote))
@@ -229,7 +233,7 @@ class GitFat(object):
             cmd += [self.objdir + '/', remote + '/']
         else:
             cmd += [remote + '/', self.objdir + '/']
-        return cmd
+        return [cmd]
     def revparse(self, revname):
         return subprocess.check_output(['git', 'rev-parse', revname]).strip()
     def encode_v1(self, digest, bytes):
@@ -445,12 +449,13 @@ class GitFat(object):
         # (includes history). Finer-grained pushing would be useful.
         pushall = '--all' in args
         files = self.referenced_objects(all=pushall) & self.catalog_objects()
-        cmd = self.get_rsync_command(push=True)
-        self.verbose('Executing: %s' % ' '.join(cmd))
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input='\x00'.join(files))
-        if p.returncode:
-            sys.exit(p.returncode)
+        cmds = self.get_rsync_command(push=True, files=files)
+        for cmd in cmds:
+            self.verbose('Executing: %s' % ' '.join(cmd))
+            p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+            p.communicate(input='\x00'.join(files))
+            if p.returncode:
+                sys.exit(p.returncode)
     def checkout(self, show_orphans=False):
         'Update any stale files in the present working tree'
         self.assert_init_done()
@@ -489,12 +494,13 @@ class GitFat(object):
             if rev:
                 refargs['rev'] = rev
         files = self.filter_objects(refargs, self.parse_pull_patterns(args))
-        cmd = self.get_rsync_command(push=False)
-        self.verbose('Executing: %s' % ' '.join(cmd))
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        p.communicate(input='\x00'.join(files))
-        if p.returncode:
-            sys.exit(p.returncode)
+        cmds = self.get_rsync_command(push=False, files=files)
+        for cmd in cmds:
+            self.verbose('Executing: %s' % ' '.join(cmd))
+            p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+            p.communicate(input='\x00'.join(files))
+            if p.returncode:
+                sys.exit(p.returncode)
         self.checkout()
 
     def parse_pull_patterns(self, args):
