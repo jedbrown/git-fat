@@ -212,7 +212,7 @@ class GitFat(object):
         try:
             initial_output = subprocess.check_output(cmd)
         except json.decoder.JSONDecodeError:
-            initial_output = {}
+            initial_output = '{}'
 
         processed = json.loads(initial_output)
         for item in processed.get("Contents", []):
