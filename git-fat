@@ -203,11 +203,13 @@ class GitFat(object):
         # Cheat here
         return path
 
-    def get_all_remote_files(self, bucket: str):
+    def get_all_remote_files(self, bucket: str, prefix):
         if bucket.startswith("s3://"):
             bucket = bucket.replace("s3://", "")
 
         cmd = ["aws", "s3api", "list-objects-v2", "--bucket", bucket]
+        if prefix:
+            cmd += ["--prefix", f'{prefix}/']
         output = []
         try:
             initial_output = subprocess.check_output(cmd)
@@ -242,7 +244,7 @@ class GitFat(object):
 
         return output
 
-    def get_aws_cmd(self, push, s3_bucket, files):
+    def get_aws_cmd(self, push, s3_bucket, s3_prefix, files):
         if not which('aws'):
             sys.stderr.write('Could not find aws cli install.\n')
             sys.exit(1)
@@ -250,14 +252,17 @@ class GitFat(object):
         if not s3_bucket.startswith('s3://'):
             s3_bucket = "s3://{}".format(s3_bucket)
         cmds = []
-        remote_files = self.get_all_remote_files(s3_bucket)
+        remote_files = self.get_all_remote_files(s3_bucket, s3_prefix)
         # self.verbose(remote_files)
         if push:
-            self.verbose('Pushing to %s' % (s3_bucket))
+            self.verbose('Pushing to %s/%s' % (s3_bucket, s3_prefix))
             for file in files:
                 self.verbose('Processing {}'.format(file))
                 local_path = os.path.join(self.objdir, file)
                 bucket_path = s3_bucket + "/" + file
+                if s3_prefix:
+                    bucket_path = f'{s3_bucket}/{s3_prefix}/{file}'
+                    file = f'{s3_prefix}/{file}'
                 cmd = [
                     "aws",
                     "s3",
@@ -275,12 +280,14 @@ class GitFat(object):
                 if int(remote_item.get("Size")) != os.path.getsize(local_path):
                     cmds.append(cmd)
         else:
-            self.verbose('Pulling from %s' % (s3_bucket))
+            self.verbose('Pulling from %s/%s' % (s3_bucket, s3_prefix))
             # self.verbose(remote_files)
             for file in files:
                 self.verbose('Processing {}'.format(file))
                 local_path = os.path.join(self.objdir, file)
                 bucket_path = s3_bucket + "/" + file
+                if s3_prefix:
+                    bucket_path = f'{s3_bucket}/{s3_prefix}/{file}'
                 cmd = [
                     "aws",
                     "s3",
@@ -301,8 +308,9 @@ class GitFat(object):
     def get_rsync_command(self,push,files):
         cfgpath = os.path.join(self.gitroot,'.gitfat')
         s3_bucket = gitconfig_get('s3.bucket', file=cfgpath)
+        s3_prefix = gitconfig_get('s3.prefix', file=cfgpath)
         if s3_bucket:
-            return self.get_aws_cmd(push, s3_bucket, files)
+            return self.get_aws_cmd(push, s3_bucket, s3_prefix, files)
         (remote, ssh_port, ssh_user, options) = self.get_rsync()
         if push:
             self.verbose('Pushing to %s' % (remote))
