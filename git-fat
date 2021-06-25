@@ -244,7 +244,7 @@ class GitFat(object):
 
         return output
 
-    def get_aws_cmd(self, push, s3_bucket, s3_prefix, files):
+    def get_aws_cmd(self, push, s3_bucket, s3_prefix, s3_extrapushargs, files):
         if not which('aws'):
             sys.stderr.write('Could not find aws cli install.\n')
             sys.exit(1)
@@ -270,6 +270,10 @@ class GitFat(object):
                     local_path,
                     bucket_path
                 ]
+
+                if s3_extrapushargs:
+                    cmd += s3_extrapushargs.split(' ')
+                self.verbose(cmd)
 
                 remote_item = self.get_remote_item(file, remote_files)
                 if remote_item == {}:
@@ -309,8 +313,10 @@ class GitFat(object):
         cfgpath = os.path.join(self.gitroot,'.gitfat')
         s3_bucket = gitconfig_get('s3.bucket', file=cfgpath)
         s3_prefix = gitconfig_get('s3.prefix', file=cfgpath)
+        s3_extrapushargs = gitconfig_get('s3.extrapushargs', file=cfgpath)
         if s3_bucket:
-            return self.get_aws_cmd(push, s3_bucket, s3_prefix, files)
+            return self.get_aws_cmd(push, s3_bucket, s3_prefix,
+                                    s3_extrapushargs, files)
         (remote, ssh_port, ssh_user, options) = self.get_rsync()
         if push:
             self.verbose('Pushing to %s' % (remote))
