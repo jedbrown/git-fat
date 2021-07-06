@@ -185,9 +185,8 @@ class GitFat(object):
         return gitconfig_get('filter.fat.clean') or gitconfig_get('filter.fat.smudge')
     def assert_init_done(self):
         if not self.is_init_done():
-            sys.stderr.write('fatal: git-fat is not yet configured in this repository.\n')
-            sys.stderr.write('Run "git fat init" to configure.\n')
-            sys.exit(1)
+            self.cmd_init()
+
     def get_rsync(self):
         cfgpath   = os.path.join(self.gitroot,'.gitfat')
         remote    = gitconfig_get('rsync.remote', file=cfgpath)
