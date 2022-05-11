@@ -608,7 +608,7 @@ class GitFat(object):
         if '--all' in args:
             refargs['all'] = True
         for arg in args:
-            if arg.startswith('-') or len(arg) != 40:
+            if arg.startswith('-') or len(arg) != 40 or os.path.exists(arg):
                 continue
             rev = self.revparse(arg)
             if rev:
