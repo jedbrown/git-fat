@@ -777,7 +777,7 @@ class GitFat(object):
         updateindex.wait()
 
 
-if __name__ == '__main__':
+def run():
     fat = GitFat()
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'filter-clean':
@@ -804,3 +804,7 @@ if __name__ == '__main__':
         fat.cmd_index_filter(sys.argv[2:])
     else:
         print('Usage: git fat [init|status|push|pull|gc|verify|checkout|find|index-filter]', file=sys.stderr)
+
+
+if __name__ == '__main__':
+    run()
