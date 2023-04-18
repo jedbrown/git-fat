@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "git-fat"
+version = "0.1.0"
+description = "Simple way to handle fat files without committing them to git"
+authors = ["Carlos Hernandez <carlos@hrndz.ca>"]
+license = "BSD-2"
+readme = "README.md"
+packages = [{include = "git_fat"}]
+
+[tool.poetry.scripts]
+git-fat = "git_fat.git_fat"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
