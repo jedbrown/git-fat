@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "git-fat"
 version = "0.1.0"
-description = "Simple way to handle fat files without committing them to git"
+description = "Simple way to handle large git files without committing them to git"
 authors = ["Carlos Hernandez <carlos@hrndz.ca>"]
 license = "BSD-2"
 readme = "README.md"
