@@ -13,6 +13,9 @@ git-fat = "git_fat.git_fat:run"
 [tool.poetry.dependencies]
 python = "^3.10"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.3.1"
+pyright = "^1.1.305"
 
 [build-system]
 requires = ["poetry-core"]
