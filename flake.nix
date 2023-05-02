@@ -19,9 +19,24 @@
       inherit (poetry2nix.legacyPackages.${system}) mkPoetryApplication mkPoetryEnv;
       poetryEnv = mkPoetryEnv {
         projectDir = ./.;
-        overrides = [
-          pkgs.poetry2nix.defaultPoetryOverrides
-        ];
+        overrides =
+          pkgs.poetry2nix.defaultPoetryOverrides.extend
+          (self: super: {
+            path-py =
+              super.path-py.overridePythonAttrs
+              (
+                old: {
+                  buildInputs = (old.buildInputs or []) ++ [super.setuptools];
+                }
+              );
+            attrs =
+              super.attrs.overridePythonAttrs
+              (
+                old: {
+                  buildInputs = (old.buildInputs or []) ++ [super.hatchling super.hatch-vcs super.hatch-fancy-pypi-readme];
+                }
+              );
+          });
         editablePackageSources = {
           git-fat = ./.;
         };
