@@ -18,6 +18,7 @@ pytest = "^7.3.1"
 pyright = "^1.1.305"
 pytest-shutil = "^1.7.0"
 pytest-docker = "^1.0.1"
+pytest-git = "^1.7.0"
 
 [build-system]
 requires = ["poetry-core"]

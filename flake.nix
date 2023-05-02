@@ -36,6 +36,13 @@
                   buildInputs = (old.buildInputs or []) ++ [super.hatchling super.hatch-vcs super.hatch-fancy-pypi-readme];
                 }
               );
+            pytest-git =
+              super.pytest-git.overridePythonAttrs
+              (
+                old: {
+                  buildInputs = (old.buildInputs or []) ++ [super.setuptools super.setuptools-git];
+                }
+              );
           });
         editablePackageSources = {
           git-fat = ./.;
