@@ -77,7 +77,7 @@ testing = ["pre-commit"]
 name = "gitdb"
 version = "4.0.10"
 description = "Git Object Database"
-category = "dev"
+category = "main"
 optional = false
 python-versions = ">=3.7"
 files = [
@@ -92,7 +92,7 @@ smmap = ">=3.0.1,<6"
 name = "gitpython"
 version = "3.1.31"
 description = "GitPython is a Python library used to interact with Git repositories"
-category = "dev"
+category = "main"
 optional = false
 python-versions = ">=3.7"
 files = [
@@ -362,7 +362,7 @@ files = [
 name = "smmap"
 version = "5.0.0"
 description = "A pure Python implementation of a sliding window memory map manager"
-category = "dev"
+category = "main"
 optional = false
 python-versions = ">=3.6"
 files = [
@@ -400,4 +400,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "213a7ebc3d22454f5e8a18dec4f44a969592d08bcaadb4af45d749698fae0d85"
+content-hash = "0543c8c77114ff0881250f4023b2811cb59da1c9b8b2596f85042996fda7d972"
