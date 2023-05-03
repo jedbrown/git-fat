@@ -30,7 +30,6 @@ env = [
     "AWS_ACCESS_KEY_ID=root",
     "AWS_SECRET_ACCESS_KEY=password",
     "AWS_DEFAULT_REGION=us-east-1",
-    "AWS_BUCKET=http://127.0.0.1:9000",
     "AWS_USE_PATH_STYLE_ENDPOINT=true"
 ]
 

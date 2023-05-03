@@ -39,8 +39,7 @@ def test_s3_git_repo(git_repo, resource_path_root):
     git_fat_conf = path / ".gitfat"
     conf = """
 [s3]
-bucket = http://localhost:9000
-prefix = munki_repo
+bucket = munki-repo
 extrapushargs = --acl bucket-owner-full-control"""
     git_fat_conf.write_text(conf)
     git_repo.run("git fat init")

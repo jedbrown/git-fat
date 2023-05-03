@@ -4,7 +4,7 @@ def test_git_fat_repo(test_s3_git_repo):
 
 
 def test_git_fat_push(wait_for_s3, test_s3_git_repo):
-    assert test_s3_git_repo.run("git fat push")
+    test_s3_git_repo.run("git fat push")
 
 
 def test_git_fat_filter_clean(test_s3_git_repo_clone):

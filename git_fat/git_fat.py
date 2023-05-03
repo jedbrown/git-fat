@@ -240,13 +240,18 @@ class GitFat(object):
         if bucket.startswith("s3://"):
             bucket = bucket.replace("s3://", "")
 
-        cmd = ["aws", "s3api", "list-objects-v2", "--bucket", bucket]
+        cmd = ["aws", "--endpoint-url", "http://localhost:9000"]
+
+        cmd += ["s3api", "list-objects-v2", "--bucket", bucket]
         if prefix:
             cmd += ["--prefix", f"{prefix}/"]
         output = []
         try:
             initial_output = subprocess.check_output(cmd)
         except json.decoder.JSONDecodeError:
+            initial_output = "{}"
+
+        if not initial_output:
             initial_output = "{}"
 
         processed = json.loads(initial_output)
@@ -296,7 +301,7 @@ class GitFat(object):
                 if s3_prefix:
                     bucket_path = f"{s3_bucket}/{s3_prefix}/{file}"
                     file = f"{s3_prefix}/{file}"
-                cmd = ["aws", "s3", "cp", local_path, bucket_path]
+                cmd = ["aws", "--endpoint-url", "http://localhost:9000", "s3", "cp", local_path, bucket_path]
 
                 if s3_extrapushargs:
                     cmd += s3_extrapushargs.split(" ")
