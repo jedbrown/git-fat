@@ -36,6 +36,13 @@
                   buildInputs = (old.buildInputs or []) ++ [super.hatchling super.hatch-vcs super.hatch-fancy-pypi-readme];
                 }
               );
+            pytest-env =
+              super.pytest-env.overridePythonAttrs
+              (
+                old: {
+                  buildInputs = (old.buildInputs or []) ++ [super.hatchling super.hatch-vcs super.hatch-fancy-pypi-readme];
+                }
+              );
             pytest-git =
               super.pytest-git.overridePythonAttrs
               (
@@ -43,6 +50,15 @@
                   buildInputs = (old.buildInputs or []) ++ [super.setuptools super.setuptools-git];
                 }
               );
+            pytest-shutil =
+              super.pytest-shutil.overridePythonAttrs
+              (
+                old: {
+                  buildInputs = (old.buildInputs or []) ++ [super.setuptools super.setuptools-git];
+                }
+              );
+            cryptography = pkgs.python3Packages.cryptography;
+            pynacl = pkgs.python3Packages.pynacl;
           });
         editablePackageSources = {
           git-fat = ./.;
