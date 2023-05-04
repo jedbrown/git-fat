@@ -6,7 +6,8 @@ import requests
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 import boto3
-import boto3.session
+from botocore.config import Config
+from git_fat.fatstores import S3FatStore
 
 pytest_plugins = ["docker_compose"]
 bucket_name = "munki-repo"
@@ -64,7 +65,7 @@ def create_bucket(api_url):
         aws_access_key_id="root",
         aws_secret_access_key="password",
         aws_session_token=None,
-        config=boto3.session.Config(signature_version="s3v4"),
+        config=Config(signature_version="s3v4"),
         verify=False,
     )
     bucket = s3.Bucket(bucket_name)
@@ -86,3 +87,14 @@ def wait_for_s3(session_scoped_container_getter):
     create_bucket(api_url)
     assert request_session.get(health_check_url)
     return request_session, api_url
+
+
+@pytest.fixture()
+def s3_fatstore():
+    fatstore = S3FatStore(
+        bucket_name=bucket_name,
+        endpoint="http://127.0.0.1:9000",
+        access_key_id="root",
+        secret_access_key="password",
+    )
+    return fatstore
