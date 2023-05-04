@@ -24,6 +24,7 @@ pytest-git = "^1.7.0"
 pytest-resource-path = "^1.3.0"
 pytest-docker-compose = "^3.2.1"
 requests = "^2.29.0"
+tox = "^3.27.0"
 
 [tool.pytest.ini_options]
 addopts = "--docker-compose=tests/docker-compose.yaml"
