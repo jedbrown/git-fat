@@ -13,57 +13,11 @@
     nixpkgs,
     flake-utils,
     poetry2nix,
-  }:
+    ...
+  } @ inputs:
     flake-utils.lib.eachDefaultSystem (system: let
       # see https://github.com/nix-community/poetry2nix/tree/master#api for more functions and examples.
-      inherit (poetry2nix.legacyPackages.${system}) mkPoetryApplication mkPoetryEnv;
-      poetryEnv = mkPoetryEnv {
-        projectDir = ./.;
-        overrides =
-          pkgs.poetry2nix.defaultPoetryOverrides.extend
-          (self: super: {
-            path-py =
-              super.path-py.overridePythonAttrs
-              (
-                old: {
-                  buildInputs = (old.buildInputs or []) ++ [super.setuptools];
-                }
-              );
-            attrs =
-              super.attrs.overridePythonAttrs
-              (
-                old: {
-                  buildInputs = (old.buildInputs or []) ++ [super.hatchling super.hatch-vcs super.hatch-fancy-pypi-readme];
-                }
-              );
-            pytest-env =
-              super.pytest-env.overridePythonAttrs
-              (
-                old: {
-                  buildInputs = (old.buildInputs or []) ++ [super.hatchling super.hatch-vcs super.hatch-fancy-pypi-readme];
-                }
-              );
-            pytest-git =
-              super.pytest-git.overridePythonAttrs
-              (
-                old: {
-                  buildInputs = (old.buildInputs or []) ++ [super.setuptools super.setuptools-git];
-                }
-              );
-            pytest-shutil =
-              super.pytest-shutil.overridePythonAttrs
-              (
-                old: {
-                  buildInputs = (old.buildInputs or []) ++ [super.setuptools super.setuptools-git];
-                }
-              );
-            cryptography = pkgs.python3Packages.cryptography;
-            pynacl = pkgs.python3Packages.pynacl;
-          });
-        editablePackageSources = {
-          git-fat = ./.;
-        };
-      };
+      inherit (poetry2nix.legacyPackages.${system}) mkPoetryApplication;
       pkgs = nixpkgs.legacyPackages.${system};
     in {
       packages = {
@@ -72,10 +26,8 @@
       };
 
       devShells.default = pkgs.mkShell {
-        buildInputs = with pkgs; [
-          python3
-          poetry
-          poetryEnv
+        buildInputs = [
+          pkgs.poetry
         ];
       };
     });

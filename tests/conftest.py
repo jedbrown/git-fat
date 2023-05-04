@@ -42,13 +42,12 @@ def test_s3_git_repo(git_repo, resource_path_root):
     git_fat_conf = path / ".gitfat"
     conf = f"""
 [s3]
-bucket = {bucket_name}
+bucket = s3://{bucket_name}
 extrapushargs = --acl bucket-owner-full-control"""
     git_fat_conf.write_text(conf)
     git_repo.run("git fat init")
     git_repo.run("git add --all")
     git_repo.api.index.commit("Initial commit")
-    print(git_repo.workspace)
     return git_repo
 
 
