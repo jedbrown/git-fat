@@ -40,10 +40,10 @@ class S3FatStore:
             "s3", config=Config(signature_version="s3v4"), verify=False, **named_args
         )
 
-    def upload(self, file_name: str, object_name=None) -> None:
-        if object_name is None:
-            object_name = os.path.basename(file_name)
-        self.bucket.upload_file(file_name, object_name)
+    def upload(self, file_name: str, remote_filename=None) -> None:
+        if remote_filename is None:
+            remote_filename = os.path.basename(file_name)
+        self.bucket.upload_file(file_name, remote_filename)
 
     def list(self):
         items = [item.key for item in self.bucket.objects.all()]
