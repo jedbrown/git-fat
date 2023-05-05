@@ -44,3 +44,7 @@ class S3FatStore:
         if object_name is None:
             object_name = os.path.basename(file_name)
         self.bucket.upload_file(file_name, object_name)
+
+    def list(self):
+        items = [item.key for item in self.bucket.objects.all()]
+        return items
