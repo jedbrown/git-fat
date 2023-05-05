@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Protocol, List
 import boto3
 import os
 from botocore.config import Config
@@ -45,6 +45,6 @@ class S3FatStore:
             remote_filename = os.path.basename(file_name)
         self.bucket.upload_file(file_name, remote_filename)
 
-    def list(self):
-        items = [item.key for item in self.bucket.objects.all()]
-        return items
+    def list(self) -> List:
+        remote_files = [item.key for item in self.bucket.objects.all()]
+        return remote_files
