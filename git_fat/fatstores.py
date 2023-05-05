@@ -48,3 +48,6 @@ class S3FatStore:
     def list(self) -> List:
         remote_files = [item.key for item in self.bucket.objects.all()]
         return remote_files
+
+    def download(self, filename: str, local_filename: str) -> None:
+        self.bucket.download_file(filename, local_filename)
