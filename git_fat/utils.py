@@ -3,9 +3,9 @@ from pathlib import Path
 import configparser as iniparser
 
 
-class ConfigParser:
+class FatRepo:
     def __init__(self, directory: str):
-        self.repo = Repo(directory)
+        self.gitapi = Repo(directory)
         self.workspace = Path(directory)
         self.gitfat_config_path = self.workspace / ".gitfat"
         self.gitfat_config = self.get_gitfat_config()
@@ -21,3 +21,15 @@ class ConfigParser:
 
     def is_fatstore_s3(self):
         return "s3" in self.gitfat_config.sections()
+
+    def is_fat_file(self, filename: str):
+        file_filters = self.gitapi.git.execute(
+            command=["git", "check-attr", "filter", "--", filename], stdout_as_string=True
+        )
+        return "filter: fat" in str(file_filters)
+
+    def get_referenced_objects(self):
+        pass
+
+    def status(self):
+        pass
