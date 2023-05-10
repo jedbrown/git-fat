@@ -2,8 +2,10 @@ from git.repo import Repo
 import git.objects
 from pathlib import Path
 from hashlib import sha1
-from typing import Union, List, Set, Tuple
+from typing import Union, List, Set, Tuple, IO
 import configparser as iniparser
+
+BLOCK_SIZE = 4096
 
 
 class FatRepo:
@@ -14,6 +16,7 @@ class FatRepo:
         self.gitfat_config = self.get_gitfat_config()
         self.magiclen = self.get_magiclen()
         self.cookie = "#$# git-fat"
+        self.objectdir = self.workspace / ".git" / "fat/objects"
 
     def encode_fat_stub(self, digest: str, size: float) -> str:
         """
@@ -38,7 +41,7 @@ class FatRepo:
                 string: Git fat stub string
         """
 
-        parts = string[len(self.cookie):].split()
+        parts = string[len(self.cookie) :].split()
         digest = parts[0]
         bytes = int(parts[1]) if len(parts) > 1 else None
         return digest, bytes
@@ -88,12 +91,32 @@ class FatRepo:
 
         for commit in self.gitapi.iter_commits(refs):
             fat_blobs = (
-                item
-                for item in commit.tree.traverse()
-                if self.is_gitfat_blob(item)
+                item for item in commit.tree.traverse() if self.is_gitfat_blob(item)
             )
             objects.update(fat_blobs)
         return objects
+
+    def setup(self):
+        pass
+
+    def clean(self):
+        pass
+
+    def is_gitfat_stub(self, data: bytes) -> bool:
+        if len(data) != self.magiclen:
+            return False
+        if not str(data).startswith(self.cookie):
+            return False
+        return True
+
+    def filter_clean(self, in_file: IO, out_file: IO):
+        first_block = in_file.read(BLOCK_SIZE)
+        if self.is_gitfat_stub(first_block):
+            out_file.write(first_block)
+            return
+
+    def smudge(self):
+        pass
 
     def status(self):
         pass
