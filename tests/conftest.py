@@ -36,7 +36,7 @@ def rsync_dest_dir(tmp_path_factory):
 
 
 @pytest.fixture()
-def test_s3_git_repo(git_repo, resource_path_root):
+def s3_gitrepo(git_repo, resource_path_root):
     path = git_repo.workspace
     s3_test_resources = resource_path_root / "s3"
     copy_files(str(s3_test_resources), str(path))
@@ -53,8 +53,8 @@ extrapushargs = --acl bucket-owner-full-control"""
 
 
 @pytest.fixture()
-def test_s3_git_repo_clone(test_s3_git_repo):
-    repo = ClonedGitRepo(test_s3_git_repo.workspace)
+def s3_cloned_gitrepo(s3_gitrepo):
+    repo = ClonedGitRepo(s3_gitrepo.workspace)
     return repo
 
 
