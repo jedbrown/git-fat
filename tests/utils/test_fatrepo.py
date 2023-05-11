@@ -37,4 +37,6 @@ def test_filter_clean(s3_cloned_gitrepo, resource_path):
     with open(fatfile, "rb") as fatstream:
         fatrepo.filter_clean(fatstream, sys.stdout.buffer)
 
-    assert (fatrepo.objdir / expected_sha1_digest).exists()
+    fatcache = fatrepo.objdir / expected_sha1_digest
+    print(f"Expecting following filef{fatcache}")
+    assert fatcache.exists()
