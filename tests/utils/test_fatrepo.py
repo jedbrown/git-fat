@@ -1,6 +1,6 @@
 from git_fat.utils import FatRepo
-import hashlib
 import io
+import sys
 
 
 def test_is_fatstore_s3(s3_gitrepo):
@@ -21,7 +21,7 @@ def test_get_fatobj(s3_gitrepo):
     assert paths.sort() == ["a.fat", "b.fat"].sort()
 
 
-def test_filter_clean(s3_cloned_gitrepo):
+def test_filter_clean(s3_cloned_gitrepo, resource_path):
     gitrepo = s3_cloned_gitrepo
     workspace = gitrepo.workspace
     fatrepo = FatRepo(s3_cloned_gitrepo.workspace)
@@ -31,12 +31,10 @@ def test_filter_clean(s3_cloned_gitrepo):
         fatrepo.filter_clean(in_file, out_file)
         assert fatfile.read_text() == out_file.getvalue()
 
-    content = b"fat content test"
-    test_file = workspace / "test.fat"
-    test_file.write_text(content.decode())
-    test_file_sha1_digest = hashlib.sha1(content).hexdigest()
+    expected_sha1_digest = "f17cc23d902436b2c06e682c48e2a4132274c8d0"
     gitrepo.run("git fat init")
-    gitrepo.run("git add --all")
-    gitrepo.api.index.commit("Adding test fat")
-    fatobj = (fatrepo.objdir / test_file_sha1_digest)
-    assert fatobj.exists()
+    fatfile = resource_path / "cool-ranch.webp"
+    with open(fatfile, "rb") as fatstream:
+        fatrepo.filter_clean(fatstream, sys.stdout.buffer)
+
+    assert (fatrepo.objdir / expected_sha1_digest).exists()

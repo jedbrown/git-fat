@@ -153,15 +153,15 @@ class FatRepo:
 
     def store_fatobj(self, cached_file: str, file_sha1_digest: str):
         objfile = self.objdir / file_sha1_digest
-        if not os.path.exists(objfile):
-            # Set permissions for the new file using the current umask
-            os.chmod(cached_file, int("444", 8) & ~umask())
-            os.rename(cached_file, objfile)
-            self.verbose(f"git-fat filter-clean: caching to {objfile}")
-        else:
+        if os.path.exists(objfile):
             self.verbose(f"git-fat filter-clean: cache already exists {objfile}")
+            os.remove(cached_file)
+            return
 
-        os.remove(cached_file)
+        # Set permissions for the new file using the current umask
+        os.chmod(cached_file, int("444", 8) & ~umask())
+        os.rename(cached_file, objfile)
+        self.verbose(f"git-fat filter-clean: caching to {objfile}")
 
     def filter_clean(self, input_handle: IO, output_handle: IO):
         first_block = input_handle.read(BLOCK_SIZE)
@@ -171,7 +171,8 @@ class FatRepo:
 
         fd, tmp_filepath = tempfile.mkstemp(dir=self.objdir)
         sha1 = hashlib.new("sha1")
-        fat_size = 0
+        sha1.update(first_block)
+        fat_size = len(first_block)
 
         with os.fdopen(fd, "wb") as cached_fatobj:
             cached_fatobj.write(first_block)
