@@ -1,3 +1,2 @@
 *.fat filter=fat -crlf
 *.webp filter=fat -crlf
-
