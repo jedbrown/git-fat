@@ -26,7 +26,7 @@ def umask():
     return old
 
 
-def touni(s, encoding="utf8"):
+def tostr(s, encoding="utf-8") -> str:
     """Automate unicode conversion"""
     if isinstance(s, str):
         return s
@@ -35,7 +35,7 @@ def touni(s, encoding="utf8"):
     raise ValueError("Cound not decode")
 
 
-def tobytes(s, encoding="utf8"):
+def tobytes(s, encoding="utf8") -> bytes:
     """Automatic byte conversion"""
     if isinstance(s, bytes):
         return s
@@ -46,23 +46,25 @@ def tobytes(s, encoding="utf8"):
 
 class FatRepo:
     def __init__(self, directory: str):
-        self.gitapi = Repo(directory)
-        self.workspace = Path(directory)
+        self.gitapi = Repo(directory, search_parent_directories=True)
+        self.git_root = self.gitapi.git.rev_parse("--show-toplevel")
+        self.workspace = Path(self.git_root)
         self.gitfat_config_path = self.workspace / ".gitfat"
         self.gitfat_config = self.get_gitfat_config()
         self.magiclen = self.get_magiclen()
-        self.cookie = "#$# git-fat"
+        self.cookie = b"#$# git-fat"
         self.objdir = self.workspace / ".git" / "fat/objects"
         self.verbose = (
             verbose_stderr if os.environ.get("GIT_FAT_VERBOSE") else verbose_ignore
         )
+        self.setup()
 
     def encode_fatstub(self, digest: str, size: float) -> str:
         """
         Returns a string containg the git-fat stub of a file cleaned with the git-fat filter.
         I.E. #$# git-fat file_hex_digest file_size
             Parameters:
-                digest (str): SHA1 Sum of file
+                sha1_digest (str): SHA1 Sum of file
                 size (float): Size of file in bytes
         """
         return "#$# git-fat %s %20d\n" % (digest, size)
@@ -78,15 +80,15 @@ class FatRepo:
 
     def decode_fatstub(self, string: str) -> Tuple[str, Union[int, None]]:
         """
-        Returns the SHA1 hex digest and size of a file that's been smudged by the git-fat filter
+        Returns the SHA1 digest and size of a file that's been smudged by the git-fat filter
             Parameters:
                 string: Git fat stub string
         """
 
         parts = string[len(self.cookie) :].split()
-        digest = parts[0]
+        sha1_digest = parts[0]
         bytes = int(parts[1]) if len(parts) > 1 else None
-        return digest, bytes
+        return sha1_digest, bytes
 
     def get_gitfat_config(self):
         gitfat_config = iniparser.ConfigParser()
@@ -114,12 +116,13 @@ class FatRepo:
         if item.size != self.magiclen:
             return False
 
-        return item.data_stream.read().decode().startswith(self.cookie)
+        fatstub_candidate = item.data_stream.read(self.magiclen)
+        return self.is_fatstub(fatstub_candidate)
 
     def get_all_git_references(self) -> List[str]:
         return [str(ref) for ref in self.gitapi.refs]
 
-    def get_fatobj(
+    def get_fatobjs(
         self, refs: Union[str, git.objects.commit.Commit, None] = None
     ) -> Set[git.objects.Blob]:
         """
@@ -139,21 +142,21 @@ class FatRepo:
         return objects
 
     def setup(self):
-        pass
+        if not self.objdir.exists():
+            self.objdir.mkdir(mode=0o755, parents=True)
 
     def clean(self):
         pass
 
     def is_fatstub(self, data: bytes) -> bool:
+        cookie = data[: len(self.cookie)]
         if len(data) != self.magiclen:
             return False
-        if not str(data).startswith(self.cookie):
-            return False
-        return True
+        return cookie == self.cookie
 
     def store_fatobj(self, cached_file: str, file_sha1_digest: str):
         objfile = self.objdir / file_sha1_digest
-        if os.path.exists(objfile):
+        if objfile.exists():
             self.verbose(f"git-fat filter-clean: cache already exists {objfile}")
             os.remove(cached_file)
             return
@@ -161,9 +164,14 @@ class FatRepo:
         # Set permissions for the new file using the current umask
         os.chmod(cached_file, int("444", 8) & ~umask())
         os.rename(cached_file, objfile)
-        self.verbose(f"git-fat filter-clean: caching to {objfile}")
+        self.verbose(
+            f"git-fat filter-clean: caching to {objfile.relative_to(self.workspace)}"
+        )
 
     def filter_clean(self, input_handle: IO, output_handle: IO):
+        """
+        Takes IO byte stream (input_handle), writes git-fat file stub (sha-magic) bytes on output_handle
+        """
         first_block = input_handle.read(BLOCK_SIZE)
         if self.is_fatstub(first_block):
             output_handle.write(first_block)
@@ -193,6 +201,40 @@ class FatRepo:
 
     def smudge(self):
         pass
+
+    def filter_smudge(self, input_handle: IO, output_handle: IO):
+        """
+        Takes IO byte stream (git-fat file stub), writes full file contents on output_handle
+        """
+        fatstub_candidate = input_handle.read(self.magiclen)
+        input_handle.close()
+        if not self.is_fatstub(fatstub_candidate):
+            self.verbose("Not a git-fat object")
+            self.verbose("git-fat filter-smudge: fat stub not found in input stream")
+            return
+
+        sha1_digest, size = self.decode_fatstub(fatstub_candidate)
+        fatobj = self.objdir / tostr(sha1_digest)
+        if not fatobj.exists:
+            self.verbose("git-fat filter-smudge: fat object missing, maybe pull?")
+            return
+
+        read_size = 0
+        with open(fatobj, "rb") as cached_fatobj:
+            while True:
+                block = cached_fatobj.read(BLOCK_SIZE)
+                if not block:
+                    break
+                output_handle.write(block)
+                read_size += len(block)
+
+        relative_obj = {fatobj.relative_to(self.workspace)}
+        if read_size == size:
+            self.verbose(f"git-fat filter-smudge: restoring file from: {relative_obj}")
+        else:
+            self.verbose(
+                f"git-fat filter-smudge: invalid file size of {relative_obj}, expected: {size}, got: {read_size}"
+            )
 
     def status(self):
         pass
