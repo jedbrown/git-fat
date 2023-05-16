@@ -35,6 +35,9 @@ env = [
     "AWS_USE_PATH_STYLE_ENDPOINT=true"
 ]
 
+[tool.black]
+line-length = 119
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
