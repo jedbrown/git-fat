@@ -1,4 +1,4 @@
-from typing import Protocol, List
+from typing import Protocol, List, Dict
 import boto3
 import os
 from botocore.config import Config
@@ -12,29 +12,23 @@ class FatStores(Protocol):
 class S3FatStore:
     def __init__(
         self,
-        bucket_name: str,
-        prefix: str = "",
-        endpoint: str = "",
-        access_key_id: str = "",
-        secret_access_key: str = "",
+        conf: Dict,
     ):
-        self.bucket_name = bucket_name
-        self.prefix = prefix
-        self.endpoint = endpoint
-        self.id = access_key_id
-        self.secret = secret_access_key
+        self.bucket_name = conf["bucket"]
+        self.prefix = conf.get("perfix")
+        self.conf = conf
 
         self.s3 = self.get_s3_resource()
         self.bucket = self.s3.Bucket(self.bucket_name)
 
     def get_s3_resource(self):
         named_args = {}
-        if self.endpoint:
-            named_args["endpoint_url"] = self.endpoint
+        if self.conf.get("endpoint"):
+            named_args["endpoint_url"] = self.conf.get("endpoint")
 
-        if self.id and self.secret:
-            named_args["aws_access_key_id"] = self.id
-            named_args["aws_secret_access_key"] = self.secret
+        if self.conf.get("id") and self.conf.get("secret"):
+            named_args["aws_access_key_id"] = self.conf.get("id")
+            named_args["aws_secret_access_key"] = self.conf.get("secret")
 
         return boto3.resource(
             "s3", config=Config(signature_version="s3v4"), verify=False, **named_args

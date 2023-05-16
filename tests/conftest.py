@@ -91,10 +91,12 @@ def wait_for_s3(session_scoped_container_getter):
 
 @pytest.fixture()
 def s3_fatstore():
-    fatstore = S3FatStore(
-        bucket_name=bucket_name,
-        endpoint="http://127.0.0.1:9000",
-        access_key_id="root",
-        secret_access_key="password",
-    )
+    config = {
+        "bucket": bucket_name,
+        "endpoint": "http://127.0.0.1:9000",
+        "access_key_id": "root",
+        "secret_access_key": "password",
+    }
+
+    fatstore = S3FatStore(config)
     return fatstore

@@ -63,15 +63,6 @@ class FatRepo:
         """
         return "#$# git-fat %s %20d\n" % (digest, size)
 
-    def get_magiclen(self) -> int:
-        """
-        Returns an interger that is equal to the length of the git-fat stub (74)
-        """
-        dummy_file_contents = b"dummy"
-        dummy_file_sha = hashlib.sha1(b"dummy").hexdigest()
-        dummy_file_size = len(dummy_file_contents)
-        return len(self.encode_fatstub(dummy_file_sha, dummy_file_size))
-
     def decode_fatstub(self, string: str) -> Tuple[str, Union[int, None]]:
         """
         Returns the sha digest and size of a file that's been smudged by the git-fat filter
@@ -83,6 +74,15 @@ class FatRepo:
         sha_digest = parts[0]
         bytes = int(parts[1]) if len(parts) > 1 else None
         return sha_digest, bytes
+
+    def get_magiclen(self) -> int:
+        """
+        Returns an interger that is equal to the length of the git-fat stub (74)
+        """
+        dummy_file_contents = b"dummy"
+        dummy_file_sha = hashlib.sha1(b"dummy").hexdigest()
+        dummy_file_size = len(dummy_file_contents)
+        return len(self.encode_fatstub(dummy_file_sha, dummy_file_size))
 
     def get_gitfat_config(self):
         gitfat_config = iniparser.ConfigParser()
