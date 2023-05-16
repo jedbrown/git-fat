@@ -40,14 +40,14 @@ class S3FatStore:
             "s3", config=Config(signature_version="s3v4"), verify=False, **named_args
         )
 
-    def upload(self, file_name: str, remote_filename=None) -> None:
+    def upload(self, local_filename: str, remote_filename=None) -> None:
         if remote_filename is None:
-            remote_filename = os.path.basename(file_name)
-        self.bucket.upload_file(file_name, remote_filename)
+            remote_filename = os.path.basename(local_filename)
+        self.bucket.upload_file(local_filename, remote_filename)
 
     def list(self) -> List:
         remote_files = [item.key for item in self.bucket.objects.all()]
         return remote_files
 
-    def download(self, filename: str, local_filename: str) -> None:
-        self.bucket.download_file(filename, local_filename)
+    def download(self, remote_filename: str, local_filename: str) -> None:
+        self.bucket.download_file(remote_filename, local_filename)

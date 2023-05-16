@@ -228,7 +228,7 @@ class FatRepo:
                 output_handle.write(block)
                 read_size += len(block)
 
-        relative_obj = {fatobj.relative_to(self.workspace)}
+        relative_obj = fatobj.relative_to(self.workspace)
         if read_size == size:
             self.verbose(f"git-fat filter-smudge: restoring file from: {relative_obj}")
         else:

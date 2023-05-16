@@ -43,18 +43,23 @@ def test_filter_clean(s3_cloned_gitrepo, resource_path):
     assert fatcache.exists()
 
 
-def test_filter_smudge(s3_cloned_gitrepo):
-    gitrepo = s3_cloned_gitrepo
+def test_filter_smudge(s3_gitrepo):
+    gitrepo = s3_gitrepo
     workspace = gitrepo.workspace
-    fatrepo = FatRepo(s3_cloned_gitrepo.workspace)
-    fatstub_file = workspace / "a.fat"
-    cached_obj_digest = "6df0c57803617bba277e90c6fa01071fb6bfebb5"
+    fatrepo = FatRepo(s3_gitrepo.workspace)
+    fatfile = workspace / "a.fat"
 
-    ## pull fat here
+    # create in memory bytes buffer
+    fatstub_buffer = io.BytesIO()
+    with open(fatfile, "rb") as in_file:
+        fatrepo.filter_clean(in_file, fatstub_buffer)
 
-    restored_fat = (workspace / "restored.fat")
-    with open(fatstub_file, "rb") as in_file, restored_fat.open("wb") as out_file:
-        fatrepo.filter_smudge(in_file, out_file)
+    # replace fatfile contents with stub
+    fatfile.remove()
+    with open(fatfile, "wb") as fatstub_stream:
+        fatstub_stream.write(fatstub_buffer.getvalue())
 
-    restored_text = restored_fat.read_text()
-    print(restored_text)
+    with open(fatfile, "rb") as in_file, io.BytesIO() as fatstub_buffer:
+        fatrepo.filter_smudge(in_file, fatstub_buffer)
+        fatstub_bytes = fatstub_buffer.getvalue()
+        assert b'fat content a\n' == fatstub_bytes
