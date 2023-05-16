@@ -45,21 +45,12 @@ def test_filter_clean(s3_cloned_gitrepo, resource_path):
 
 def test_filter_smudge(s3_gitrepo):
     gitrepo = s3_gitrepo
-    workspace = gitrepo.workspace
     fatrepo = FatRepo(s3_gitrepo.workspace)
-    fatfile = workspace / "a.fat"
 
-    # create in memory bytes buffer
-    fatstub_buffer = io.BytesIO()
-    with open(fatfile, "rb") as in_file:
-        fatrepo.filter_clean(in_file, fatstub_buffer)
+    head = gitrepo.api.head.commit
+    fatstub = (head.tree / "a.fat").data_stream
 
-    # replace fatfile contents with stub
-    fatfile.remove()
-    with open(fatfile, "wb") as fatstub_stream:
-        fatstub_stream.write(fatstub_buffer.getvalue())
-
-    with open(fatfile, "rb") as in_file, io.BytesIO() as fatstub_buffer:
-        fatrepo.filter_smudge(in_file, fatstub_buffer)
-        fatstub_bytes = fatstub_buffer.getvalue()
+    with io.BytesIO() as buffer:
+        fatrepo.filter_smudge(fatstub, buffer)
+        fatstub_bytes = buffer.getvalue()
         assert b'fat content a\n' == fatstub_bytes

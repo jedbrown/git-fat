@@ -198,7 +198,6 @@ class FatRepo:
         Takes IO byte stream (git-fat file stub), writes full file contents on output_handle
         """
         fatstub_candidate = input_handle.read(self.magiclen)
-        input_handle.close()
         if not self.is_fatstub(fatstub_candidate):
             self.verbose("Not a git-fat object")
             self.verbose("git-fat filter-smudge: fat stub not found in input stream")
