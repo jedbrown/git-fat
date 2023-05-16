@@ -11,14 +11,6 @@ import sys
 BLOCK_SIZE = 4096
 
 
-def verbose_stderr(*args, **kwargs):
-    return print(*args, file=sys.stderr, **kwargs)
-
-
-def verbose_ignore(*args, **kwargs):
-    pass
-
-
 def umask():
     """Get umask without changing it."""
     old = os.umask(0)
@@ -54,17 +46,19 @@ class FatRepo:
         self.magiclen = self.get_magiclen()
         self.cookie = b"#$# git-fat"
         self.objdir = self.workspace / ".git" / "fat/objects"
-        self.verbose = (
-            verbose_stderr if os.environ.get("GIT_FAT_VERBOSE") else verbose_ignore
-        )
+        self.debug = True if os.environ.get("GIT_FAT_VERBOSE") else False
         self.setup()
+
+    def verbose(self, *args, force: bool = False, **kargs):
+        if force or self.debug:
+            return print(*args, file=sys.stderr, **kargs)
 
     def encode_fatstub(self, digest: str, size: float) -> str:
         """
         Returns a string containg the git-fat stub of a file cleaned with the git-fat filter.
         I.E. #$# git-fat file_hex_digest file_size
             Parameters:
-                sha1_digest (str): SHA1 Sum of file
+                sha_digest (str): sha Sum of file
                 size (float): Size of file in bytes
         """
         return "#$# git-fat %s %20d\n" % (digest, size)
@@ -74,21 +68,21 @@ class FatRepo:
         Returns an interger that is equal to the length of the git-fat stub (74)
         """
         dummy_file_contents = b"dummy"
-        dummy_file_sha1 = hashlib.sha1(b"dummy").hexdigest()
+        dummy_file_sha = hashlib.sha1(b"dummy").hexdigest()
         dummy_file_size = len(dummy_file_contents)
-        return len(self.encode_fatstub(dummy_file_sha1, dummy_file_size))
+        return len(self.encode_fatstub(dummy_file_sha, dummy_file_size))
 
     def decode_fatstub(self, string: str) -> Tuple[str, Union[int, None]]:
         """
-        Returns the SHA1 digest and size of a file that's been smudged by the git-fat filter
+        Returns the sha digest and size of a file that's been smudged by the git-fat filter
             Parameters:
                 string: Git fat stub string
         """
 
         parts = string[len(self.cookie) :].split()
-        sha1_digest = parts[0]
+        sha_digest = parts[0]
         bytes = int(parts[1]) if len(parts) > 1 else None
-        return sha1_digest, bytes
+        return sha_digest, bytes
 
     def get_gitfat_config(self):
         gitfat_config = iniparser.ConfigParser()
@@ -154,10 +148,12 @@ class FatRepo:
             return False
         return cookie == self.cookie
 
-    def store_fatobj(self, cached_file: str, file_sha1_digest: str):
-        objfile = self.objdir / file_sha1_digest
+    def store_fatobj(self, cached_file: str, file_sha_digest: str):
+        objfile = self.objdir / file_sha_digest
         if objfile.exists():
-            self.verbose(f"git-fat filter-clean: cache already exists {objfile}")
+            self.verbose(
+                f"git-fat filter-clean: cache already exists {objfile}", force=True
+            )
             os.remove(cached_file)
             return
 
@@ -165,7 +161,8 @@ class FatRepo:
         os.chmod(cached_file, int("444", 8) & ~umask())
         os.rename(cached_file, objfile)
         self.verbose(
-            f"git-fat filter-clean: caching to {objfile.relative_to(self.workspace)}"
+            f"git-fat filter-clean: caching to {objfile.relative_to(self.workspace)}",
+            force=True,
         )
 
     def filter_clean(self, input_handle: IO, output_handle: IO):
@@ -178,8 +175,8 @@ class FatRepo:
             return
 
         fd, tmp_filepath = tempfile.mkstemp(dir=self.objdir)
-        sha1 = hashlib.new("sha1")
-        sha1.update(first_block)
+        sha = hashlib.new("sha1")
+        sha.update(first_block)
         fat_size = len(first_block)
 
         with os.fdopen(fd, "wb") as cached_fatobj:
@@ -188,14 +185,14 @@ class FatRepo:
                 block = input_handle.read(BLOCK_SIZE)
                 if not block:
                     break
-                sha1.update(block)
+                sha.update(block)
                 fat_size += len(block)
                 cached_fatobj.write(block)
             cached_fatobj.flush()
 
-        sha1_digest = sha1.hexdigest()
-        self.store_fatobj(tmp_filepath, sha1_digest)
-        fatstub = self.encode_fatstub(sha1_digest, fat_size)
+        sha_digest = sha.hexdigest()
+        self.store_fatobj(tmp_filepath, sha_digest)
+        fatstub = self.encode_fatstub(sha_digest, fat_size)
         # output clean bytes (fatstub) to output_handle
         output_handle.write(tobytes(fatstub))
 
@@ -213,8 +210,8 @@ class FatRepo:
             self.verbose("git-fat filter-smudge: fat stub not found in input stream")
             return
 
-        sha1_digest, size = self.decode_fatstub(fatstub_candidate)
-        fatobj = self.objdir / tostr(sha1_digest)
+        sha_digest, size = self.decode_fatstub(fatstub_candidate)
+        fatobj = self.objdir / tostr(sha_digest)
         if not fatobj.exists:
             self.verbose("git-fat filter-smudge: fat object missing, maybe pull?")
             return
@@ -230,11 +227,18 @@ class FatRepo:
 
         relative_obj = fatobj.relative_to(self.workspace)
         if read_size == size:
-            self.verbose(f"git-fat filter-smudge: restoring file from: {relative_obj}")
+            self.verbose(
+                f"git-fat filter-smudge: restoring file from: {relative_obj}",
+                force=True,
+            )
         else:
             self.verbose(
-                f"git-fat filter-smudge: invalid file size of {relative_obj}, expected: {size}, got: {read_size}"
+                f"git-fat filter-smudge: invalid file size of {relative_obj}, expected: {size}, got: {read_size}",
+                froce=True,
             )
+
+    def is_on_remote_cache(self, fat_sha_digets):
+        pass
 
     def status(self):
         pass
