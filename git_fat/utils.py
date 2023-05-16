@@ -116,9 +116,7 @@ class FatRepo:
     def get_all_git_references(self) -> List[str]:
         return [str(ref) for ref in self.gitapi.refs]
 
-    def get_fatobjs(
-        self, refs: Union[str, git.objects.commit.Commit, None] = None
-    ) -> Set[git.objects.Blob]:
+    def get_fatobjs(self, refs: Union[str, git.objects.commit.Commit, None] = None) -> Set[git.objects.Blob]:
         """
         Returns a filtered list of GitPython blob objects categorized as git-fat blobs.
         see: https://gitpython.readthedocs.io/en/stable/reference.html?highlight=size#module-git.objects.base
@@ -129,9 +127,7 @@ class FatRepo:
         objects = set()
 
         for commit in self.gitapi.iter_commits(refs):
-            fat_blobs = (
-                item for item in commit.tree.traverse() if self.is_fatblob(item)
-            )
+            fat_blobs = (item for item in commit.tree.traverse() if self.is_fatblob(item))
             objects.update(fat_blobs)
         return objects
 
@@ -151,9 +147,7 @@ class FatRepo:
     def store_fatobj(self, cached_file: str, file_sha_digest: str):
         objfile = self.objdir / file_sha_digest
         if objfile.exists():
-            self.verbose(
-                f"git-fat filter-clean: cache already exists {objfile}", force=True
-            )
+            self.verbose(f"git-fat filter-clean: cache already exists {objfile}", force=True)
             os.remove(cached_file)
             return
 
