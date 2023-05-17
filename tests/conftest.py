@@ -44,6 +44,7 @@ def s3_gitrepo(git_repo, resource_path_root):
     conf = f"""
 [s3]
 bucket = s3://{bucket_name}
+endpoint = http://127.0.0.1:9000
 extrapushargs = --acl bucket-owner-full-control"""
     git_fat_conf.write_text(conf)
     git_repo.run("git fat init")
@@ -94,8 +95,9 @@ def s3_fatstore():
     config = {
         "bucket": bucket_name,
         "endpoint": "http://127.0.0.1:9000",
-        "access_key_id": "root",
-        "secret_access_key": "password",
+        # following being pulled from env
+        # "access_key_id": "root",
+        # "secret_access_key": "password",
     }
 
     fatstore = S3FatStore(config)

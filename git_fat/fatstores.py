@@ -14,12 +14,18 @@ class S3FatStore:
         self,
         conf: Dict,
     ):
-        self.bucket_name = conf["bucket"]
+        self.bucket_name = self.get_bucket_name(conf["bucket"])
         self.prefix = conf.get("perfix")
         self.conf = conf
 
         self.s3 = self.get_s3_resource()
         self.bucket = self.s3.Bucket(self.bucket_name)
+
+    def get_bucket_name(self, possible_name: str):
+        s3_uri_prefix = "s3://"
+        if possible_name.startswith(s3_uri_prefix):
+            return possible_name[len(s3_uri_prefix):]
+        return possible_name
 
     def get_s3_resource(self):
         named_args = {}
@@ -45,3 +51,7 @@ class S3FatStore:
 
     def download(self, remote_filename: str, local_filename: str) -> None:
         self.bucket.download_file(remote_filename, local_filename)
+
+    def delete(self, filename: str) -> None:
+        s3_object = self.bucket.Object(filename)
+        s3_object.delete()

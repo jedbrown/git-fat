@@ -6,6 +6,7 @@ def test_upload_file(wait_for_s3, workspace, s3_fatstore):
 
 def test_list(wait_for_s3, s3_fatstore):
     files = s3_fatstore.list()
+    print(files)
     assert len(files) >= 1
 
 

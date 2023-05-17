@@ -1,6 +1,7 @@
 from git.repo import Repo
 import git.objects
 from pathlib import Path
+from git_fat.fatstores import S3FatStore
 import hashlib
 from typing import Union, List, Set, Tuple, IO
 import configparser as iniparser
@@ -36,6 +37,13 @@ def tobytes(s, encoding="utf8") -> bytes:
     raise ValueError("Could not encode")
 
 
+class FatObj:
+    def __init__(self, path: str, fatid: str, size: int):
+        self.fatid = fatid
+        self.path = path
+        self.size = size
+
+
 class FatRepo:
     def __init__(self, directory: str):
         self.gitapi = Repo(directory, search_parent_directories=True)
@@ -47,11 +55,12 @@ class FatRepo:
         self.cookie = b"#$# git-fat"
         self.objdir = self.workspace / ".git" / "fat/objects"
         self.debug = True if os.environ.get("GIT_FAT_VERBOSE") else False
+        self.fatstore = self.get_fatstore()
         self.setup()
 
     def verbose(self, *args, force: bool = False, **kargs):
         if force or self.debug:
-            return print(*args, file=sys.stderr, **kargs)
+            print(*args, file=sys.stderr, **kargs)
 
     def encode_fatstub(self, digest: str, size: float) -> str:
         """
@@ -63,17 +72,17 @@ class FatRepo:
         """
         return "#$# git-fat %s %20d\n" % (digest, size)
 
-    def decode_fatstub(self, string: str) -> Tuple[str, Union[int, None]]:
+    def decode_fatstub(self, string: str) -> Tuple[str, int]:
         """
-        Returns the sha digest and size of a file that's been smudged by the git-fat filter
+        Returns the fatid (sha1 digest) and size of a file that's been smudged by the git-fat filter
             Parameters:
                 string: Git fat stub string
         """
 
         parts = string[len(self.cookie) :].split()
-        sha_digest = parts[0]
-        bytes = int(parts[1]) if len(parts) > 1 else None
-        return sha_digest, bytes
+        fatid = parts[0]
+        size = int(parts[1]) if len(parts) > 1 else 0
+        return fatid, size
 
     def get_magiclen(self) -> int:
         """
@@ -92,6 +101,11 @@ class FatRepo:
             raise Exception("Invalid gitfat config")
 
         return gitfat_config
+
+    def get_fatstore(self):
+        # if self.is_fatstore_s3():
+        config = dict(self.gitfat_config["s3"])
+        return S3FatStore(config)
 
     def is_fatstore_s3(self):
         return "s3" in self.gitfat_config.sections()
@@ -116,7 +130,12 @@ class FatRepo:
     def get_all_git_references(self) -> List[str]:
         return [str(ref) for ref in self.gitapi.refs]
 
-    def get_fatobjs(self, refs: Union[str, git.objects.commit.Commit, None] = None) -> Set[git.objects.Blob]:
+    def create_fatobj(self, blob: git.objects.Blob) -> FatObj:
+        fatid, size = self.decode_fatstub(blob.data_stream.read())
+
+        return FatObj(path=blob.path, fatid=tostr(fatid), size=size)
+
+    def get_fatobjs(self, refs: Union[str, git.objects.commit.Commit, None] = None) -> List[FatObj]:
         """
         Returns a filtered list of GitPython blob objects categorized as git-fat blobs.
         see: https://gitpython.readthedocs.io/en/stable/reference.html?highlight=size#module-git.objects.base
@@ -124,12 +143,14 @@ class FatRepo:
                 refs: A valid Git reference or list of references defaults to HEAD
         """
         refs = "HEAD" if refs is None else refs
-        objects = set()
+        unique_fatobjs = set()
 
         for commit in self.gitapi.iter_commits(refs):
-            fat_blobs = (item for item in commit.tree.traverse() if self.is_fatblob(item))
-            objects.update(fat_blobs)
-        return objects
+            fatobjs = (
+                self.create_fatobj(item) for item in commit.tree.traverse() if self.is_fatblob(item)  # type: ignore
+            )
+            unique_fatobjs.update(fatobjs)
+        return list(unique_fatobjs)
 
     def setup(self):
         if not self.objdir.exists():
@@ -144,7 +165,7 @@ class FatRepo:
             return False
         return cookie == self.cookie
 
-    def store_fatobj(self, cached_file: str, file_sha_digest: str):
+    def cache_fatfile(self, cached_file: str, file_sha_digest: str):
         objfile = self.objdir / file_sha_digest
         if objfile.exists():
             self.verbose(f"git-fat filter-clean: cache already exists {objfile}", force=True)
@@ -168,24 +189,24 @@ class FatRepo:
             output_handle.write(first_block)
             return
 
-        fd, tmp_filepath = tempfile.mkstemp(dir=self.objdir)
+        fd, tmpfile_path = tempfile.mkstemp(dir=self.objdir)
         sha = hashlib.new("sha1")
         sha.update(first_block)
         fat_size = len(first_block)
 
-        with os.fdopen(fd, "wb") as cached_fatobj:
-            cached_fatobj.write(first_block)
+        with os.fdopen(fd, "wb") as tmpfile_handle:
+            tmpfile_handle.write(first_block)
             while True:
                 block = input_handle.read(BLOCK_SIZE)
                 if not block:
                     break
                 sha.update(block)
                 fat_size += len(block)
-                cached_fatobj.write(block)
-            cached_fatobj.flush()
+                tmpfile_handle.write(block)
+            tmpfile_handle.flush()
 
         sha_digest = sha.hexdigest()
-        self.store_fatobj(tmp_filepath, sha_digest)
+        self.cache_fatfile(tmpfile_path, sha_digest)
         fatstub = self.encode_fatstub(sha_digest, fat_size)
         # output clean bytes (fatstub) to output_handle
         output_handle.write(tobytes(fatstub))
@@ -204,21 +225,21 @@ class FatRepo:
             return
 
         sha_digest, size = self.decode_fatstub(fatstub_candidate)
-        fatobj = self.objdir / tostr(sha_digest)
-        if not fatobj.exists:
+        fatfile = self.objdir / tostr(sha_digest)
+        if not fatfile.exists:
             self.verbose("git-fat filter-smudge: fat object missing, maybe pull?")
             return
 
         read_size = 0
-        with open(fatobj, "rb") as cached_fatobj:
+        with open(fatfile, "rb") as fatfile_handle:
             while True:
-                block = cached_fatobj.read(BLOCK_SIZE)
+                block = fatfile_handle.read(BLOCK_SIZE)
                 if not block:
                     break
                 output_handle.write(block)
                 read_size += len(block)
 
-        relative_obj = fatobj.relative_to(self.workspace)
+        relative_obj = fatfile.relative_to(self.workspace)
         if read_size == size:
             self.verbose(
                 f"git-fat filter-smudge: restoring file from: {relative_obj}",
@@ -227,10 +248,33 @@ class FatRepo:
         else:
             self.verbose(
                 f"git-fat filter-smudge: invalid file size of {relative_obj}, expected: {size}, got: {read_size}",
-                froce=True,
+                force=True,
             )
 
-    def is_on_remote_cache(self, fat_sha_digets):
+    def push(self, *args):
+        self.setup()
+        local_fatfiles = os.listdir(self.objdir)
+        remote_fatfiles = self.fatstore.list()
+        commited_fatobjs = self.get_fatobjs()
+
+        push_candidates = [fatobj for fatobj in commited_fatobjs if fatobj.fatid in local_fatfiles]
+        if len(push_candidates) == 0:
+            self.verbose("git-fat push: nothing to push", force=True)
+            return
+
+        needs_pushing = [fatobj for fatobj in push_candidates if fatobj.fatid not in remote_fatfiles]
+        self.push_fatobjs(needs_pushing)
+
+    def push_fatobjs(self, objects: List[FatObj]):
+        if len(objects) == 0:
+            self.verbose("git-fat push: nothing to push", force=True)
+            return
+
+        for obj in objects:
+            self.verbose(f"git-fat push: uploading {obj.path}", force=True)
+            self.fatstore.upload(str(self.objdir / obj.fatid))
+
+    def is_remote_cached(self, fat_sha_digets):
         pass
 
     def status(self):
