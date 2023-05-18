@@ -49,7 +49,7 @@ class S3FatStore:
         remote_files = [item.key for item in self.bucket.objects.all()]
         return remote_files
 
-    def download(self, remote_filename: str, local_filename: str) -> None:
+    def download(self, remote_filename: str, local_filename: os.PathLike) -> None:
         self.bucket.download_file(remote_filename, local_filename)
 
     def delete(self, filename: str) -> None:

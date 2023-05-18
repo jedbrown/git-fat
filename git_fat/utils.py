@@ -252,16 +252,13 @@ class FatRepo:
                 force=True,
             )
 
-    def restore_fatobj(self, cache: Path, obj: Path):
-        self.verbose(f"git-fat pull: restoring {obj.name} from {cache.name}", force=True)
-        stat = os.lstat(obj)
+    def restore_fatobj(self, obj: FatObj):
+        cache = self.objdir / obj.fatid
+        self.verbose(f"git-fat pull: restoring {obj.path} from {cache.name}", force=True)
+        stat = os.lstat(obj.abspath)
         # force smudge by invalidating lstat in git index
-        os.utime(obj, (stat.st_atime, stat.st_mtime + 1))
-        # self.gitapi.git.execute(
-        #     command=["git", "check-attr", "filter", "--", obj.name],
-        #     stdout_as_string=True,
-        # )
-        self.gitapi.index.checkout(str(obj), force=True, index=True)
+        os.utime(obj.abspath, (stat.st_atime, stat.st_mtime + 1))
+        self.gitapi.index.checkout(obj.abspath, force=True, index=True)
 
     def pull_all(self):
         local_fatfiles = os.listdir(self.objdir)
@@ -274,20 +271,32 @@ class FatRepo:
             return
 
         for obj in commited_fatobjs:
-            if obj.fatid not in pull_candidates and obj.fatid not in remote_fatfiles:
+            if obj.fatid not in pull_candidates or obj.fatid not in remote_fatfiles:
+                self.verbose(f"git-fat pull: {obj.path} found locally, skipping", force=True)
                 continue
-            cached_fatfile = str(self.objdir / obj.fatid)
             self.verbose(f"git-fat pull: pulling {obj.path}", force=True)
-            self.fatstore.download(obj.fatid, cached_fatfile)
-            self.restore_fatobj(Path(cached_fatfile), Path(obj.abspath))
+            self.fatstore.download(obj.fatid, self.objdir / obj.fatid)
+            self.restore_fatobj(obj)
 
-    def pull(self, all: bool = False, **args):
-        if len(args) == 0 and not all:
+    def pull(self, all: bool = False, files: List[str] = []):
+        if len(files) == 0 and not all:
             self.verbose("git-fat pull: nothing to pull", force=True)
             return
 
         if all:
             self.pull_all()
+            return
+        for fname in files:
+            try:
+                blob = self.gitapi.tree() / fname
+                if not self.is_fatblob(blob):
+                    self.verbose(f"git-fat pull: {fname} is not a fat object", force=True)
+                    continue
+                obj = self.create_fatobj(blob)  # type: ignore
+                self.fatstore.download(obj.fatid, self.objdir / obj.fatid)
+                self.restore_fatobj(obj)
+            except KeyError:
+                self.verbose(f"git-fat pull: {fname} not found in repo", force=True)
 
     def push(self, *args):
         self.setup()

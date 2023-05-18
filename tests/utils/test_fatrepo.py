@@ -84,6 +84,11 @@ def test_pull(s3_gitrepo, s3_cloned_gitrepo):
         command=["git", "fat", "init"],
         stdout_as_string=True,
     )
+    cloned_fatrepo.pull(files=["a.fat"])
+    with open(cloned_fatrepo.workspace / "a.fat") as fd:
+        print("Reading content of restored a.fat file:")
+        print(fd.read())
+
     cloned_fatrepo.pull(all=True)
 
     status = cloned_fatrepo.gitapi.git.execute(
@@ -91,8 +96,8 @@ def test_pull(s3_gitrepo, s3_cloned_gitrepo):
         stdout_as_string=True,
     )
     print(f"comfirming no changes:\n {status}")
-    with open(cloned_fatrepo.workspace / "a.fat") as fd:
-        print("Reading content of restored file:")
+    with open(cloned_fatrepo.workspace / "b.fat") as fd:
+        print("Reading content of restored b.fat file:")
         print(fd.read())
 
     status = cloned_fatrepo.gitapi.git.execute(
