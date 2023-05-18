@@ -298,7 +298,7 @@ class FatRepo:
             except KeyError:
                 self.verbose(f"git-fat pull: {fname} not found in repo", force=True)
 
-    def push(self, *args):
+    def push(self):
         self.setup()
         local_fatfiles = os.listdir(self.objdir)
         remote_fatfiles = self.fatstore.list()
@@ -320,9 +320,6 @@ class FatRepo:
         for obj in objects:
             self.verbose(f"git-fat push: uploading {obj.path}", force=True)
             self.fatstore.upload(str(self.objdir / obj.fatid))
-
-    def is_remote_cached(self, fat_sha_digets):
-        pass
 
     def status(self):
         pass
