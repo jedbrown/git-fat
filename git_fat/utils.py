@@ -3,7 +3,7 @@ import git.objects
 from pathlib import Path
 from git_fat.fatstores import S3FatStore
 import hashlib
-from typing import Union, List, Set, Tuple, IO
+from typing import Union, List, Tuple, IO
 import configparser as iniparser
 import tempfile
 import os
@@ -38,16 +38,17 @@ def tobytes(s, encoding="utf8") -> bytes:
 
 
 class FatObj:
-    def __init__(self, path: str, fatid: str, size: int):
+    def __init__(self, path: os.PathLike, fatid: str, size: int, abspath: os.PathLike):
         self.fatid = fatid
         self.path = path
+        self.abspath = abspath
         self.size = size
 
 
 class FatRepo:
     def __init__(self, directory: str):
         self.gitapi = Repo(directory, search_parent_directories=True)
-        self.git_root = self.gitapi.git.rev_parse("--show-toplevel")
+        self.git_root = self.gitapi.working_dir
         self.workspace = Path(self.git_root)
         self.gitfat_config_path = self.workspace / ".gitfat"
         self.gitfat_config = self.get_gitfat_config()
@@ -133,7 +134,7 @@ class FatRepo:
     def create_fatobj(self, blob: git.objects.Blob) -> FatObj:
         fatid, size = self.decode_fatstub(blob.data_stream.read())
 
-        return FatObj(path=blob.path, fatid=tostr(fatid), size=size)
+        return FatObj(path=blob.path, fatid=tostr(fatid), size=size, abspath=blob.abspath)
 
     def get_fatobjs(self, refs: Union[str, git.objects.commit.Commit, None] = None) -> List[FatObj]:
         """
@@ -250,6 +251,43 @@ class FatRepo:
                 f"git-fat filter-smudge: invalid file size of {relative_obj}, expected: {size}, got: {read_size}",
                 force=True,
             )
+
+    def restore_fatobj(self, cache: Path, obj: Path):
+        self.verbose(f"git-fat pull: restoring {obj.name} from {cache.name}", force=True)
+        stat = os.lstat(obj)
+        # force smudge by invalidating lstat in git index
+        os.utime(obj, (stat.st_atime, stat.st_mtime + 1))
+        # self.gitapi.git.execute(
+        #     command=["git", "check-attr", "filter", "--", obj.name],
+        #     stdout_as_string=True,
+        # )
+        self.gitapi.index.checkout(str(obj), force=True, index=True)
+
+    def pull_all(self):
+        local_fatfiles = os.listdir(self.objdir)
+        remote_fatfiles = self.fatstore.list()
+        commited_fatobjs = self.get_fatobjs()
+
+        pull_candidates = [file for file in remote_fatfiles if file not in local_fatfiles]
+        if len(pull_candidates) == 0:
+            self.verbose("git-fat pull: nothing to pull", force=True)
+            return
+
+        for obj in commited_fatobjs:
+            if obj.fatid not in pull_candidates and obj.fatid not in remote_fatfiles:
+                continue
+            cached_fatfile = str(self.objdir / obj.fatid)
+            self.verbose(f"git-fat pull: pulling {obj.path}", force=True)
+            self.fatstore.download(obj.fatid, cached_fatfile)
+            self.restore_fatobj(Path(cached_fatfile), Path(obj.abspath))
+
+    def pull(self, all: bool = False, **args):
+        if len(args) == 0 and not all:
+            self.verbose("git-fat pull: nothing to pull", force=True)
+            return
+
+        if all:
+            self.pull_all()
 
     def push(self, *args):
         self.setup()
