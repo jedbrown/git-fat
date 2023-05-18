@@ -94,7 +94,11 @@ class FatRepo:
         dummy_file_size = len(dummy_file_contents)
         return len(self.encode_fatstub(dummy_file_sha, dummy_file_size))
 
-    def get_gitfat_config(self):
+    def get_gitfat_config(self) -> iniparser.ConfigParser:
+        """
+        Returns ConfigParser for gitfat config found in repo
+        """
+
         gitfat_config = iniparser.ConfigParser()
         gitfat_config.read(self.gitfat_config_path)
 
@@ -278,7 +282,7 @@ class FatRepo:
             self.fatstore.download(obj.fatid, self.objdir / obj.fatid)
             self.restore_fatobj(obj)
 
-    def pull(self, all: bool = False, files: List[str] = []):
+    def pull(self, all: bool = False, files: List[os.PathLike] = []):
         if len(files) == 0 and not all:
             self.verbose("git-fat pull: nothing to pull", force=True)
             return
@@ -286,17 +290,18 @@ class FatRepo:
         if all:
             self.pull_all()
             return
-        for fname in files:
+        for fpath in files:
             try:
-                blob = self.gitapi.tree() / fname
+                relativep = fpath.relative_to(self.gitapi.working_dir)  # type: ignore
+                blob = self.gitapi.tree() / str(relativep)
                 if not self.is_fatblob(blob):
-                    self.verbose(f"git-fat pull: {fname} is not a fat object", force=True)
+                    self.verbose(f"git-fat pull: {relativep} is not a fat object", force=True)
                     continue
                 obj = self.create_fatobj(blob)  # type: ignore
                 self.fatstore.download(obj.fatid, self.objdir / obj.fatid)
                 self.restore_fatobj(obj)
             except KeyError:
-                self.verbose(f"git-fat pull: {fname} not found in repo", force=True)
+                self.verbose(f"git-fat pull: {fpath} not found in repo", force=True)
 
     def push(self):
         self.setup()

@@ -84,7 +84,8 @@ def test_pull(s3_gitrepo, s3_cloned_gitrepo):
         command=["git", "fat", "init"],
         stdout_as_string=True,
     )
-    cloned_fatrepo.pull(files=["a.fat"])
+    a_fat_path = cloned_fatrepo.workspace / "a.fat"
+    cloned_fatrepo.pull(files=[a_fat_path])
     with open(cloned_fatrepo.workspace / "a.fat") as fd:
         print("Reading content of restored a.fat file:")
         print(fd.read())
