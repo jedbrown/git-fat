@@ -16,10 +16,11 @@ def test_is_fat_file(s3_gitrepo):
 
 def test_get_fatobjs(s3_gitrepo):
     fatrepo = FatRepo(s3_gitrepo.workspace)
-    blobs = fatrepo.get_fatobjs()
-    paths = [blob.path for blob in blobs]
-    assert len(list(blobs)) == 2
-    assert paths.sort() == ["a.fat", "b.fat"].sort()
+    all_fatobjs = fatrepo.get_fatobjs()
+    assert len(list(all_fatobjs)) == 2
+    expected_fatobjs = ["a.fat", "b.fat"]
+    filtered = [fatobj for fatobj in all_fatobjs if fatobj.path not in expected_fatobjs]
+    assert len(filtered) == 0
 
 
 def test_filter_clean(s3_cloned_gitrepo, resource_path):
