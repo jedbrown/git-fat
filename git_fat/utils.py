@@ -308,6 +308,15 @@ class FatRepo:
             except KeyError:
                 self.verbose(f"git-fat pull: {fpath} not found in repo", force=True)
 
+    def push_fatobjs(self, objects: List[FatObj]):
+        if len(objects) == 0:
+            self.verbose("git-fat push: nothing to push", force=True)
+            return
+
+        for obj in objects:
+            self.verbose(f"git-fat push: uploading {obj.path}", force=True)
+            self.fatstore.upload(str(self.objdir / obj.fatid))
+
     def push(self):
         self.setup()
         local_fatfiles = os.listdir(self.objdir)
@@ -321,15 +330,6 @@ class FatRepo:
 
         needs_pushing = [fatobj for fatobj in push_candidates if fatobj.fatid not in remote_fatfiles]
         self.push_fatobjs(needs_pushing)
-
-    def push_fatobjs(self, objects: List[FatObj]):
-        if len(objects) == 0:
-            self.verbose("git-fat push: nothing to push", force=True)
-            return
-
-        for obj in objects:
-            self.verbose(f"git-fat push: uploading {obj.path}", force=True)
-            self.fatstore.upload(str(self.objdir / obj.fatid))
 
     def status(self):
         pass
