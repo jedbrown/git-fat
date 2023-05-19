@@ -46,10 +46,9 @@ class FatObj:
 
 
 class FatRepo:
-    def __init__(self, directory: str):
-        self.gitapi = Repo(directory, search_parent_directories=True)
-        self.git_root = self.gitapi.working_dir
-        self.workspace = Path(self.git_root)
+    def __init__(self, directory: Path):
+        self.gitapi = Repo(str(directory), search_parent_directories=True)
+        self.workspace = Path(directory)
         self.gitfat_config_path = self.workspace / ".gitfat"
         self.magiclen = self.get_magiclen()
         self.cookie = b"#$# git-fat"
