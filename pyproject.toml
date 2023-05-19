@@ -8,7 +8,7 @@ readme = "README.md"
 packages = [{include = "git_fat"}]
 
 [tool.poetry.scripts]
-git-fat = "git_fat.git_fat:run"
+git-fat = "git_fat.cmdline:main"
 gfat = "git_fat.cmdline:main"
 
 [tool.poetry.dependencies]

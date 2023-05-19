@@ -41,22 +41,22 @@ def get_valid_fpaths(files: List[str]) -> List[Path]:
     return fpaths
 
 
-def init_cmd(args):
-    print("Configuring fat git filters")
+def init_cmd(_):
+    print("git-fat: Configured clean and smudge filter", file=sys.stderr)
+    with fatrepo.gitapi.config_writer() as cw:
+        cw.set_value('filter "fat"', "clean", "git fat filter-clean")
+        cw.set_value('filter "fat"', "smudge", "git fat filter-smudge")
 
 
-def clean_cmd():
-    print("running clean")
+def clean_cmd(_):
+    fatrepo.filter_clean(sys.stdin.buffer, sys.stdout.buffer)
 
 
-def smudge_cmd():
-    print("running smudge")
+def smudge_cmd(_):
+    fatrepo.filter_smudge(sys.stdin.buffer, sys.stdout.buffer)
 
 
-def push_cmd(args):
-    if len(args) > 0:
-        print("git-fat push: takes no additional arguments", file=sys.stderr)
-        sys.exit(1)
+def push_cmd(_):
     fatrepo.push()
 
 
@@ -85,10 +85,14 @@ def main():
     clean_parser = subparsers.add_parser(
         "filter-clean", help="Takes byte stream (STDIN) and spits out (STDOUT) corresponding fatstub"
     )
+    smudge_parser = subparsers.add_parser(
+        "filter-smudge", help="Takes fatstub byte stream (STDIN) and spits out (STDOUT) corresponding bytes file"
+    )
     pull_parser.set_defaults(func=pull_cmd)
     push_parser.set_defaults(func=push_cmd)
     init_parser.set_defaults(func=init_cmd)
     clean_parser.set_defaults(func=clean_cmd)
+    smudge_parser.set_defaults(func=smudge_cmd)
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)

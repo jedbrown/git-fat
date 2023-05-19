@@ -8,6 +8,7 @@ import configparser as iniparser
 import tempfile
 import os
 import sys
+import subprocess
 
 BLOCK_SIZE = 4096
 
@@ -184,7 +185,7 @@ class FatRepo:
     def cache_fatfile(self, cached_file: str, file_sha_digest: str):
         objfile = self.objdir / file_sha_digest
         if objfile.exists():
-            self.verbose(f"git-fat filter-clean: cache already exists {objfile}", force=True)
+            self.verbose(f"git-fat: cache already exists {objfile}", force=True)
             os.remove(cached_file)
             return
 
@@ -200,7 +201,7 @@ class FatRepo:
         """
         Takes IO byte stream (input_handle), writes git-fat file stub (sha-magic) bytes on output_handle
         """
-        first_block = input_handle.read(BLOCK_SIZE)
+        first_block = tobytes(input_handle.read(BLOCK_SIZE))
         if self.is_fatstub(first_block):
             output_handle.write(first_block)
             return
@@ -213,7 +214,7 @@ class FatRepo:
         with os.fdopen(fd, "wb") as tmpfile_handle:
             tmpfile_handle.write(first_block)
             while True:
-                block = input_handle.read(BLOCK_SIZE)
+                block = tobytes(input_handle.read(BLOCK_SIZE))
                 if not block:
                     break
                 sha.update(block)
@@ -253,12 +254,7 @@ class FatRepo:
                 read_size += len(block)
 
         relative_obj = fatfile.relative_to(self.workspace)
-        if read_size == size:
-            self.verbose(
-                f"git-fat filter-smudge: restoring file from: {relative_obj}",
-                force=True,
-            )
-        else:
+        if read_size != size:
             self.verbose(
                 f"git-fat filter-smudge: invalid file size of {relative_obj}, expected: {size}, got: {read_size}",
                 force=True,
@@ -266,11 +262,17 @@ class FatRepo:
 
     def restore_fatobj(self, obj: FatObj):
         cache = self.objdir / obj.fatid
-        self.verbose(f"git-fat pull: restoring {obj.path} from {cache.name}", force=True)
+        self.verbose(f"git-fat pull: restore {obj.path} from {cache.name}", force=True)
         stat = os.lstat(obj.abspath)
         # force smudge by invalidating lstat in git index
         os.utime(obj.abspath, (stat.st_atime, stat.st_mtime + 1))
-        self.gitapi.index.checkout(obj.abspath, force=True, index=True)
+        # TODO: very inefficient
+        subprocess.check_call(
+            ["git", "checkout-index", "--index", "--force", obj.abspath],
+            cwd=self.workspace
+        )
+        # TODO: This throws errors if you spit messaging on stderr
+        # self.gitapi.index.checkout(obj.path, force=True, index=True)
 
     def pull_all(self):
         local_fatfiles = os.listdir(self.objdir)
@@ -286,7 +288,7 @@ class FatRepo:
             if obj.fatid not in pull_candidates or obj.fatid not in remote_fatfiles:
                 self.verbose(f"git-fat pull: {obj.path} found locally, skipping", force=True)
                 continue
-            self.verbose(f"git-fat pull: pulling {obj.path}", force=True)
+            self.verbose(f"git-fat pull: pulling {obj.fatid} to {obj.path}", force=True)
             self.fatstore.download(obj.fatid, self.objdir / obj.fatid)
             self.restore_fatobj(obj)
 
@@ -303,6 +305,7 @@ class FatRepo:
                     self.verbose(f"git-fat pull: {relativep} is not a fat object", force=True)
                     continue
                 obj = self.create_fatobj(blob)  # type: ignore
+                self.verbose(f"git-fat pull: pulling {obj.fatid} to {obj.path}", force=True)
                 self.fatstore.download(obj.fatid, self.objdir / obj.fatid)
                 self.restore_fatobj(obj)
             except KeyError:
