@@ -290,14 +290,11 @@ class FatRepo:
             self.fatstore.download(obj.fatid, self.objdir / obj.fatid)
             self.restore_fatobj(obj)
 
-    def pull(self, all: bool = False, files: List[os.PathLike] = []):
-        if len(files) == 0 and not all:
+    def pull(self, files: List[Path] = []):
+        if len(files) == 0:
             self.verbose("git-fat pull: nothing to pull", force=True)
             return
 
-        if all:
-            self.pull_all()
-            return
         for fpath in files:
             try:
                 relativep = fpath.relative_to(self.gitapi.working_dir)  # type: ignore
