@@ -51,13 +51,25 @@ class FatRepo:
         self.git_root = self.gitapi.working_dir
         self.workspace = Path(self.git_root)
         self.gitfat_config_path = self.workspace / ".gitfat"
-        self.gitfat_config = self.get_gitfat_config()
         self.magiclen = self.get_magiclen()
         self.cookie = b"#$# git-fat"
         self.objdir = self.workspace / ".git" / "fat/objects"
         self.debug = True if os.environ.get("GIT_FAT_VERBOSE") else False
-        self.fatstore = self.get_fatstore()
+        self._gitfat_config = None
+        self._fatstore = None
         self.setup()
+
+    @property
+    def gitfat_config(self):
+        if not self._gitfat_config:
+            self._gitfat_config = self.get_gitfat_config()
+        return self._gitfat_config
+
+    @property
+    def fatstore(self):
+        if not self._fatstore:
+            self._fatstore = self.get_fatstore()
+        return self._fatstore
 
     def verbose(self, *args, force: bool = False, **kargs):
         if force or self.debug:
