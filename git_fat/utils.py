@@ -172,9 +172,6 @@ class FatRepo:
         if not self.objdir.exists():
             self.objdir.mkdir(mode=0o755, parents=True)
 
-    def clean(self):
-        pass
-
     def is_fatstub(self, data: bytes) -> bool:
         cookie = data[: len(self.cookie)]
         if len(data) != self.magiclen:
@@ -226,9 +223,6 @@ class FatRepo:
         fatstub = self.encode_fatstub(sha_digest, fat_size)
         # output clean bytes (fatstub) to output_handle
         output_handle.write(tobytes(fatstub))
-
-    def smudge(self):
-        pass
 
     def filter_smudge(self, input_handle: IO, output_handle: IO):
         """
