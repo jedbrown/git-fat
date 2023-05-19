@@ -90,7 +90,7 @@ def test_pull(s3_gitrepo, s3_cloned_gitrepo):
         print("Reading content of restored a.fat file:")
         print(fd.read())
 
-    cloned_fatrepo.pull(all=True)
+    cloned_fatrepo.pull_all()
 
     status = cloned_fatrepo.gitapi.git.execute(
         command=["git", "status"],

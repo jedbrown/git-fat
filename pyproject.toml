@@ -9,6 +9,7 @@ packages = [{include = "git_fat"}]
 
 [tool.poetry.scripts]
 git-fat = "git_fat.git_fat:run"
+gfat = "git_fat.cmdline:main"
 
 [tool.poetry.dependencies]
 python = "^3.10"

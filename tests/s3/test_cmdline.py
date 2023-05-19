@@ -19,3 +19,15 @@ def test_git_fat_pull(wait_for_s3, s3_cloned_gitrepo):
     content = (s3_cloned_gitrepo.workspace / "a.fat").read_text()
     assert content_before_pull != "fat content a\n"
     assert content == "fat content a\n"
+
+
+def test_gfat_pull(wait_for_s3, s3_cloned_gitrepo):
+    s3_cloned_gitrepo.run("git fat init")
+    content_before_pull = (s3_cloned_gitrepo.workspace / "a.fat").read_text()
+    s3_cloned_gitrepo.run("gfat pull a.fat")
+    content = (s3_cloned_gitrepo.workspace / "a.fat").read_text()
+    assert content_before_pull != "fat content a\n"
+    assert content == "fat content a\n"
+
+    # pull all files
+    s3_cloned_gitrepo.run("gfat pull -a")
