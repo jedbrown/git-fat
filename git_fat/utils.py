@@ -109,6 +109,9 @@ class FatRepo:
         """
         Returns ConfigParser for gitfat config found in repo
         """
+        if not self.gitfat_config_path.exists():
+            self.verbose("No valid fat config exists", force=True)
+            sys.exit(1)
 
         gitfat_config = iniparser.ConfigParser()
         gitfat_config.read(self.gitfat_config_path)
