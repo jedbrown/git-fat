@@ -13,6 +13,7 @@ import threading
 import time
 import json
 import collections
+from shutil import which
 
 if sys.version_info[0] > 2:
     unicode = str
@@ -240,13 +241,18 @@ class GitFat(object):
         if bucket.startswith("s3://"):
             bucket = bucket.replace("s3://", "")
 
-        cmd = ["aws", "s3api", "list-objects-v2", "--bucket", bucket]
+        cmd = ["aws", "--endpoint-url", "http://localhost:9000"]
+
+        cmd += ["s3api", "list-objects-v2", "--bucket", bucket]
         if prefix:
             cmd += ["--prefix", f"{prefix}/"]
         output = []
         try:
             initial_output = subprocess.check_output(cmd)
         except json.decoder.JSONDecodeError:
+            initial_output = "{}"
+
+        if not initial_output:
             initial_output = "{}"
 
         processed = json.loads(initial_output)
@@ -296,7 +302,15 @@ class GitFat(object):
                 if s3_prefix:
                     bucket_path = f"{s3_bucket}/{s3_prefix}/{file}"
                     file = f"{s3_prefix}/{file}"
-                cmd = ["aws", "s3", "cp", local_path, bucket_path]
+                cmd = [
+                    "aws",
+                    "--endpoint-url",
+                    "http://localhost:9000",
+                    "s3",
+                    "cp",
+                    local_path,
+                    bucket_path,
+                ]
 
                 if s3_extrapushargs:
                     cmd += s3_extrapushargs.split(" ")
@@ -319,7 +333,15 @@ class GitFat(object):
                 bucket_path = s3_bucket + "/" + file
                 if s3_prefix:
                     bucket_path = f"{s3_bucket}/{s3_prefix}/{file}"
-                cmd = ["aws", "s3", "cp", bucket_path, local_path]
+                cmd = [
+                    "aws",
+                    "--endpoint-url",
+                    "http://localhost:9000",
+                    "s3",
+                    "cp",
+                    bucket_path,
+                    local_path,
+                ]
                 if not os.path.exists(local_path):
                     cmds.append(cmd)
                     continue
@@ -376,7 +398,7 @@ class GitFat(object):
         cookie = "#$# git-fat "
         string = touni(string)
         if string.startswith(cookie):
-            parts = string[len(cookie):].split()
+            parts = string[len(cookie) :].split()
             digest = parts[0]
             bytes = int(parts[1]) if len(parts) > 1 else None
             return digest, bytes
@@ -435,7 +457,7 @@ class GitFat(object):
                 for block in readblocks(instream):
                     if firstblock:
                         if len(block) == self.magiclen and self.decode_clean(
-                            block[0:self.magiclen]
+                            block[0 : self.magiclen]
                         ):
                             ishanging = True  # Working tree version is verbatim from repository (not smudged)
                             outstream = outstreamclean
@@ -658,7 +680,7 @@ class GitFat(object):
                 # This re-smudge is essentially a copy that restores
                 # permissions.
                 subprocess.check_call(
-                    ["git", "checkout-index", "--index", "--force", fname]
+                    ["git", "checkout-index", "--index", "--force", fname],
                 )
             elif show_orphans:
                 print("Data unavailable: %s %s" % (digest, fname))
