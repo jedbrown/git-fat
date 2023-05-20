@@ -286,7 +286,7 @@ class FatRepo:
             if obj.fatid not in pull_candidates or obj.fatid not in remote_fatfiles:
                 self.verbose(f"git-fat pull: {obj.path} found locally, skipping", force=True)
                 continue
-            self.verbose(f"git-fat pull: pulling {obj.fatid} to {obj.path}", force=True)
+            self.verbose(f"git-fat pull: downloading {obj.fatid}")
             self.fatstore.download(obj.fatid, self.objdir / obj.fatid)
             self.restore_fatobj(obj)
 
