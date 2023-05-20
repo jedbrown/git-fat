@@ -8,7 +8,7 @@ import configparser as iniparser
 import tempfile
 import os
 import sys
-import subprocess
+import shutil
 
 BLOCK_SIZE = 4096
 
@@ -185,7 +185,7 @@ class FatRepo:
     def cache_fatfile(self, cached_file: str, file_sha_digest: str):
         objfile = self.objdir / file_sha_digest
         if objfile.exists():
-            self.verbose(f"git-fat: cache already exists {objfile}", force=True)
+            self.verbose(f"git-fat: cache already exists {objfile}")
             os.remove(cached_file)
             return
 
@@ -264,15 +264,13 @@ class FatRepo:
         cache = self.objdir / obj.fatid
         self.verbose(f"git-fat pull: restore {obj.path} from {cache.name}", force=True)
         stat = os.lstat(obj.abspath)
-        # force smudge by invalidating lstat in git index
-        os.utime(obj.abspath, (stat.st_atime, stat.st_mtime + 1))
-        # TODO: very inefficient
-        subprocess.check_call(
-            ["git", "checkout-index", "--index", "--force", obj.abspath],
-            cwd=self.workspace
+        shutil.copy(self.objdir / obj.fatid, obj.abspath)
+        os.chmod(obj.abspath, stat.st_mode)
+        os.utime(obj.abspath, (stat.st_atime, stat.st_mtime))
+        self.gitapi.git.execute(
+            command=["git", "update-index", obj.abspath],
+            stdout_as_string=True,
         )
-        # TODO: This throws errors if you spit messaging on stderr
-        # self.gitapi.index.checkout(obj.path, force=True, index=True)
 
     def pull_all(self):
         local_fatfiles = os.listdir(self.objdir)
