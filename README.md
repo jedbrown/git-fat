@@ -1,6 +1,6 @@
 # Introduction
 
-==Warning heavy re-write in progress, dome docs below maybe out of date==
+<code><i><b>Warning</b></i> heavy re-write in progress, dome docs below maybe out of date</code>
 
 Checking large binary files into a source repository (Git or otherwise) is a bad
 idea because repository size quickly becomes unreasonable. Even if the
