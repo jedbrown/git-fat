@@ -30,11 +30,6 @@ class ClonedGitRepo(Workspace):
         self.uri = "file://%s" % self.workspace
 
 
-@pytest.fixture(scope="session")
-def rsync_dest_dir(tmp_path_factory):
-    return tmp_path_factory.mktemp("data")
-
-
 @pytest.fixture()
 def s3_gitrepo(git_repo, resource_path_root):
     path = git_repo.workspace
@@ -75,8 +70,8 @@ def create_bucket(api_url):
 
 
 # Invoking this fixture: 'function_scoped_container_getter' starts all services
-@pytest.fixture(scope="session")
-def wait_for_s3(session_scoped_container_getter):
+@pytest.fixture(scope="session", autouse=True)
+def setup_s3(session_scoped_container_getter):
     """Wait for the api from my_api_service to become responsive"""
     request_session = requests.Session()
     retries = Retry(total=10, backoff_factor=0.2, status_forcelist=[500, 502, 503, 504])

@@ -1,0 +1,69 @@
+---
+
+name: CI
+# yamllint disable-line
+on:
+  pull_request:
+
+jobs:
+  linting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Linting via Pre-commit
+        uses: pre-commit/action@v3.0.0
+  tests:
+    needs: linting
+    strategy:
+      fail-fast: true
+      matrix:
+        os: ["ubuntu-latest"]
+        python-version: ["3.10", "3.11"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # ----------------------------------------------
+      #        check-out repo and set-up python
+      # ----------------------------------------------
+      - name: Check out repository
+        uses: actions/checkout@v3
+      - name: Set up python ${{ matrix.python-version }}
+        id: setup-python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      # ----------------------------------------------
+      #   -----  install & configure poetry  -----
+      # ----------------------------------------------
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      # ----------------------------------------------
+      #        load cached venv if cache exists
+      # ----------------------------------------------
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          # yamllint disable-line
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+      # ----------------------------------------------
+      #  install dependencies if cache does not exist
+      # ----------------------------------------------
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+      # ----------------------------------------------
+      #  install your root project, if required
+      # ----------------------------------------------
+      - name: Install library
+        run: poetry install --no-interaction
+      - name: Test with pytest
+        run: |
+          source .venv/bin/activate
+          pytest --cov=git_fat tests --cov-report=term-missing
