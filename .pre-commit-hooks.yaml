@@ -1,0 +1,10 @@
+---
+- id: fatstore-check
+  name: fatstore-check
+  description: Large (fat) file manager
+  entry: git-fat fatstore-check
+  language: python
+  stages: [pre-merge-commit, manual]
+  minimum_pre_commit_version: 2.9.2
+  verbose: true
+  require_serial: true

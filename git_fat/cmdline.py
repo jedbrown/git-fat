@@ -7,8 +7,16 @@ import subprocess
 from typing import List
 from pathlib import Path
 from git_fat.utils import FatRepo
+from importlib.metadata import version
+
+__version__ = version("git-fat")
 
 fatrepo: FatRepo
+
+
+class NotInGitrepo(Exception):
+    "Raised when working directory is not part of a git-repo tree"
+    pass
 
 
 def get_gitroot() -> Path:
@@ -17,7 +25,7 @@ def get_gitroot() -> Path:
         gitroot = gitroot_check_output.strip()
         return Path(str(gitroot))
     except subprocess.CalledProcessError:
-        sys.exit(1)
+        raise NotInGitrepo
 
 
 def get_fatrepo() -> FatRepo:
@@ -61,11 +69,11 @@ def push_cmd(_):
 
 
 def pull_cmd(args):
-    if args.all:
+    if getattr(args, "all", None):
         print("git-fat pull: downloading and restoring all files in remote fatstore", file=sys.stderr)
         fatrepo.pull_all()
         return
-    if args.files:
+    if getattr(args, "files", None):
         fpaths = get_valid_fpaths(args.files)
         fatrepo.pull(fpaths)
         return
@@ -74,8 +82,17 @@ def pull_cmd(args):
     sys.exit(1)
 
 
+def fatstore_check_cmd(args):
+    if getattr(args, "files", None):
+        fpaths = get_valid_fpaths(args.files)
+        fatrepo.fatstore_check(fpaths)
+        return
+    fatrepo.fatstore_check()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Large (fat) file manager for git")
+    parser.add_argument("-v", "--version", action="store_true", help="Show package version")
     subparsers = parser.add_subparsers()
     pull_parser = subparsers.add_parser("pull", help="Download and restore large files from fatstore")
     pull_parser.add_argument("-a", "--all", action="store_true", help="Download and restore all large files")
@@ -88,19 +105,28 @@ def main():
     smudge_parser = subparsers.add_parser(
         "filter-smudge", help="Takes fatstub byte stream (STDIN) and spits out (STDOUT) corresponding bytes file"
     )
+    fatstore_check = subparsers.add_parser(
+        "fatstore-check", help="Confirm all files or passed files are downloadable from fatstore"
+    )
+    fatstore_check.add_argument("files", nargs="*", help="List of files to check")
     pull_parser.set_defaults(func=pull_cmd)
     push_parser.set_defaults(func=push_cmd)
     init_parser.set_defaults(func=init_cmd)
     clean_parser.set_defaults(func=clean_cmd)
     smudge_parser.set_defaults(func=smudge_cmd)
+    fatstore_check.set_defaults(func=fatstore_check_cmd)
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
 
+    args = parser.parse_args()
+    if args.version:
+        print(__version__)
+        sys.exit(0)
+
     global fatrepo
     fatrepo = get_fatrepo()
-    args = parser.parse_args()
     args.func(args)
 
 
