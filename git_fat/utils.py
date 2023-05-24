@@ -1,10 +1,13 @@
 from git.repo import Repo
+from git import Commit
+from git.objects.base import Object as Gobject
+from functools import singledispatchmethod
 import git.objects
 from pathlib import Path
 from git_fat.fatstores import S3FatStore
 import hashlib
-from typing import List, Tuple, IO
-import configparser as iniparser
+from typing import List, Set, Tuple, IO
+import tomli
 import tempfile
 import os
 import sys
@@ -38,6 +41,10 @@ def tobytes(s, encoding="utf8") -> bytes:
     raise ValueError("Could not encode")
 
 
+class NoArgs:
+    pass
+
+
 class FatObj:
     def __init__(self, path: os.PathLike, fatid: str, size: int, abspath: os.PathLike):
         self.fatid = fatid
@@ -68,6 +75,7 @@ class FatRepo:
         self.debug = True if os.environ.get("GIT_FAT_VERBOSE") else False
         self._gitfat_config = None
         self._fatstore = None
+        self._smudgestore = None
         self.setup()
 
     @property
@@ -81,6 +89,12 @@ class FatRepo:
         if not self._fatstore:
             self._fatstore = self.get_fatstore()
         return self._fatstore
+
+    @property
+    def smudgestore(self):
+        if not self._smudgestore:
+            self._smudgestore = self.get_smudgestore()
+        return self._smudgestore
 
     def verbose(self, *args, force: bool = False, **kargs):
         if force or self.debug:
@@ -117,38 +131,46 @@ class FatRepo:
         dummy_file_size = len(dummy_file_contents)
         return len(self.encode_fatstub(dummy_file_sha, dummy_file_size))
 
-    def get_gitfat_config(self) -> iniparser.ConfigParser:
+    def get_gitfat_config(self) -> dict:
         """
-        Returns ConfigParser for gitfat config found in repo
+        Returns a directory of gitfat config in repo
         """
         if not self.gitfat_config_path.exists():
             self.verbose("No valid fat config exists", force=True)
             sys.exit(1)
 
-        gitfat_config = iniparser.ConfigParser()
-        gitfat_config.read(self.gitfat_config_path)
-
-        if len(gitfat_config.sections()) != 1:
-            raise Exception("Invalid gitfat config")
+        with open(self.gitfat_config_path, "rb") as f:
+            gitfat_config = tomli.load(f)
 
         return gitfat_config
 
-    def get_fatstore(self):
-        # if self.is_fatstore_s3():
-        config = dict(self.gitfat_config["s3"])
+    def get_fatstore_type(self) -> str:
+        """
+        Returns first section name from gitfat config
+        """
+        config_keys = list(self.gitfat_config.keys())
+        return config_keys[0]
+
+    def get_smudgestore(self):
+        """
+        Returns initialize smudge store as described in gitfat config
+        """
+        fatstore_type = self.get_fatstore_type()
+        config = dict(self.gitfat_config[fatstore_type]["smudgestore"])
         return S3FatStore(config)
 
-    def is_fatstore_s3(self):
-        return "s3" in self.gitfat_config.sections()
+    def get_fatstore(self):
+        """
+        Returns initialize fatstore as described in gitfat config
+        """
+        fatstore_type = self.get_fatstore_type()
+        config = self.gitfat_config[fatstore_type]
+        return S3FatStore(config)
 
-    def is_fatfile(self, filename: str):
-        file_filters = self.gitapi.git.execute(
-            command=["git", "check-attr", "filter", "--", filename],
-            stdout_as_string=True,
-        )
-        return "filter: fat" in str(file_filters)
-
-    def is_fatblob(self, item):
+    def is_fatblob(self, item: Gobject):
+        """
+        Takes GitPython object, returns true if Blob and datastream starts with git-fat cookie
+        """
         if item.type != "blob":
             return False
 
@@ -163,12 +185,10 @@ class FatRepo:
 
         return FatObj(path=blob.path, fatid=tostr(fatid), size=size, abspath=blob.abspath)
 
-    def get_fatobjs(self) -> List[FatObj]:
+    def get_indexed_fatobjs(self) -> Set[FatObj]:
         """
         Returns a filtered list of GitPython blob objects categorized as git-fat blobs.
         see: https://gitpython.readthedocs.io/en/stable/reference.html?highlight=size#module-git.objects.base
-            Parameters:
-                refs: A valid Git reference or list of references defaults to HEAD
         """
         unique_fatobjs = set()
 
@@ -176,7 +196,7 @@ class FatRepo:
         unique_fatobjs = {
             self.create_fatobj(blob) for stage, blob in index.iter_blobs() if stage == 0 and self.is_fatblob(blob)
         }
-        return list(unique_fatobjs)
+        return unique_fatobjs
 
     def setup(self):
         if not self.objdir.exists():
@@ -278,7 +298,7 @@ class FatRepo:
     def pull_all(self):
         local_fatfiles = os.listdir(self.objdir)
         remote_fatfiles = self.fatstore.list()
-        idx_fatobjs = self.get_fatobjs()
+        idx_fatobjs = self.get_indexed_fatobjs()
 
         pull_candidates = [file for file in remote_fatfiles if file not in local_fatfiles]
         if len(pull_candidates) == 0:
@@ -325,7 +345,7 @@ class FatRepo:
         self.setup()
         local_fatfiles = os.listdir(self.objdir)
         remote_fatfiles = self.fatstore.list()
-        idx_fatojbs = self.get_fatobjs()
+        idx_fatojbs = self.get_indexed_fatobjs()
 
         push_candidates = [fatobj for fatobj in idx_fatojbs if fatobj.fatid in local_fatfiles]
         if len(push_candidates) == 0:
@@ -335,22 +355,68 @@ class FatRepo:
         needs_pushing = [fatobj for fatobj in push_candidates if fatobj.fatid not in remote_fatfiles]
         self.push_fatobjs(needs_pushing)
 
-    def fatstore_check(self, fpaths: List[Path] = []) -> None:
+    def confirm_on_remote(self, search_list: Set[FatObj]) -> None:
         remote_fatfiles = self.fatstore.list()
-        idx_fatobjs = self.get_fatobjs()
-
-        if len(fpaths) != 0:
-            requested_abspaths = [str(fpath.absolute()) for fpath in fpaths]
-            fatobjs_to_find = {fatobj for fatobj in idx_fatobjs if fatobj.abspath in requested_abspaths}
-        else:
-            fatobjs_to_find = idx_fatobjs
-
-        missing_fatobjs = [fatobj for fatobj in fatobjs_to_find if fatobj.fatid not in remote_fatfiles]
-
+        missing_fatobjs = [fatobj for fatobj in search_list if fatobj.fatid not in remote_fatfiles]
         if len(missing_fatobjs) != 0:
             for missing_obj in missing_fatobjs:
                 self.verbose(f"git-fat: {missing_obj.path} not found on remote store", force=True)
             sys.exit(1)
 
-    def status(self):
-        pass
+    def get_added_fatobjs(self, ref: Commit) -> Set[FatObj]:
+        """
+        Compares given commit with HEAD (active_branch) and returns set of FatObj
+        """
+        hcommit = self.gitapi.head.commit
+        diff_index = ref.diff(hcommit)
+        added_fatobjs = set()
+        for diff_item in diff_index.iter_change_type("A"):
+            new_blob = diff_item.b_blob
+            if not self.is_fatblob(new_blob):
+                continue
+            added_fatobjs.add(self.create_fatobj(new_blob))
+        return added_fatobjs
+
+    @singledispatchmethod
+    def fatstore_check(self, arg):
+        raise NotImplementedError(f"Cannot format value of type {type(arg)}")
+
+    @fatstore_check.register(list)
+    def _(
+        self, files  # type: List[Path]
+    ) -> None:
+        if len(files) == 0:
+            return
+        fatobjs = self.get_indexed_fatobjs()
+        requested_abspaths = [str(fpath.absolute()) for fpath in files]
+        fatobjs_to_find = {o for o in fatobjs if o.abspath in requested_abspaths}
+        self.confirm_on_remote(fatobjs_to_find)
+
+    @fatstore_check.register(NoArgs)
+    def _(self, _) -> None:
+        fatobjs = self.get_indexed_fatobjs()
+        self.confirm_on_remote(fatobjs)
+
+    @fatstore_check.register(Commit)
+    def _(
+        self, branch  # type: Commit
+    ) -> None:
+        added_blobs = self.get_added_fatobjs(branch)
+        self.confirm_on_remote(added_blobs)
+
+    def publish_added_fatobjs(self, ref: Commit) -> None:
+        """
+        Takes REF, finds new fatobjs in REF but not in HEAD and uploads to smudge store
+        """
+        added_fatobjs = self.get_added_fatobjs(ref)
+        for fatobj in added_fatobjs:
+            fpath = Path(fatobj.abspath)
+            keyname = str(fpath.relative_to(self.workspace))
+            fatobj_cache_path = self.objdir / fatobj.fatid
+            if not fatobj_cache_path.exists():
+                self.pull(files=[fpath])
+            self.verbose(f"git-fat: publishing '{keyname}' to smudgestore", force=True)
+            self.smudgestore.upload(local_filename=str(fatobj_cache_path), remote_filename=keyname)
+
+    # def status(self):
+    #     pass

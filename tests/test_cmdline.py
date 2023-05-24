@@ -68,6 +68,7 @@ def test_get_valid_fpaths(s3_gitrepo):
 def test_fatstore_check_cmd(s3_gitrepo):
     s3_gitrepo.run("git-fat fatstore-check")
     s3_gitrepo.run("git-fat fatstore-check a.fat")
+    s3_gitrepo.run("git-fat fatstore-check-ref")
 
 
 def test_cmdline_main(s3_gitrepo, monkeypatch):

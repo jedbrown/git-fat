@@ -1,32 +1,23 @@
 from git_fat.utils import FatRepo
+from git_fat.fatstores import S3FatStore
+from pytest_git import GitRepo
+import os
 import io
 import sys
+import subprocess
 
 
-def test_is_fatstore_s3(s3_gitrepo):
-    fatrepo = FatRepo(s3_gitrepo.workspace)
-    assert fatrepo.is_fatstore_s3()
-
-
-def test_is_fat_file(s3_gitrepo):
-    fatrepo = FatRepo(s3_gitrepo.workspace)
-    assert fatrepo.is_fatfile(filename=s3_gitrepo.workspace / "a.fat")
-
-
-def test_get_fatobjs(s3_gitrepo):
-    fatrepo = FatRepo(s3_gitrepo.workspace)
-    all_fatobjs = fatrepo.get_fatobjs()
+def test_get_indexed_fatobjs(fatrepo):
+    all_fatobjs = fatrepo.get_indexed_fatobjs()
     assert len(list(all_fatobjs)) == 2
     expected_fatobjs = ["a.fat", "b.fat"]
     filtered = [fatobj for fatobj in all_fatobjs if fatobj.path not in expected_fatobjs]
     assert len(filtered) == 0
 
 
-def test_filter_clean(s3_cloned_gitrepo, resource_path):
-    gitrepo = s3_cloned_gitrepo
-    workspace = gitrepo.workspace
-    fatrepo = FatRepo(gitrepo.workspace)
-    fatfile = workspace / "a.fat"
+def test_filter_clean(cloned_fatrepo: FatRepo, resource_path):
+    fatrepo = cloned_fatrepo
+    fatfile = fatrepo.workspace / "a.fat"
 
     # test to ensure no double cleans
     with open(fatfile, "rb") as in_file, io.BytesIO() as out_file:
@@ -34,7 +25,7 @@ def test_filter_clean(s3_cloned_gitrepo, resource_path):
         assert fatfile.read_bytes() == out_file.getvalue()
 
     expected_sha1_digest = "f17cc23d902436b2c06e682c48e2a4132274c8d0"
-    gitrepo.run("git fat init")
+    fatrepo.gitapi.git.execute(command=["git-fat", "init"])
     fatfile = resource_path / "cool-ranch.webp"
     with open(fatfile, "rb") as fatstream:
         fatrepo.filter_clean(fatstream, sys.stdout.buffer)
@@ -44,11 +35,8 @@ def test_filter_clean(s3_cloned_gitrepo, resource_path):
     assert fatcache.exists()
 
 
-def test_filter_smudge(s3_gitrepo):
-    gitrepo = s3_gitrepo
-    fatrepo = FatRepo(gitrepo.workspace)
-
-    head = gitrepo.api.head.commit
+def test_filter_smudge(fatrepo):
+    head = fatrepo.gitapi.head.commit
     fatstub = (head.tree / "a.fat").data_stream
 
     with io.BytesIO() as buffer:
@@ -57,26 +45,22 @@ def test_filter_smudge(s3_gitrepo):
         assert b"fat content a\n" == fatstub_bytes
 
 
-def test_push(s3_gitrepo, s3_fatstore):
-    gitrepo = s3_gitrepo
-    fatrepo = FatRepo(gitrepo.workspace)
+def test_push(fatrepo, s3_fatstore):
     # nothing to push
     fatrepo.push()
 
+    store_count = len(s3_fatstore.list())
     s3_fatstore.delete("6df0c57803617bba277e90c6fa01071fb6bfebb5")
-    assert len(s3_fatstore.list()) == 2
     fatrepo.push()
-    assert len(s3_fatstore.list()) == 3
+    after_push_count = len(s3_fatstore.list())
+    assert store_count == after_push_count
 
 
-def test_pull(s3_gitrepo, s3_cloned_gitrepo):
-    gitrepo = s3_gitrepo
-    fatrepo = FatRepo(gitrepo.workspace)
+def test_pull(fatrepo: FatRepo, cloned_fatrepo: FatRepo):
     # nothing to pull
     fatrepo.pull()
 
-    cloned_fatrepo = FatRepo(s3_cloned_gitrepo.workspace)
-    head = s3_cloned_gitrepo.api.head.commit
+    head = cloned_fatrepo.gitapi.head.commit
     a_fat = (head.tree / "a.fat").data_stream
     print(f"fatstub : {a_fat.read()}")
 
@@ -106,3 +90,54 @@ def test_pull(s3_gitrepo, s3_cloned_gitrepo):
         stdout_as_string=True,
     )
     print(f"comfirming no changes:\n {status}")
+
+
+def test_get_added_fatobjs(s3_gitrepo: GitRepo, fatrepo: FatRepo):
+    gitrepo = s3_gitrepo
+    gitrepo.run("git checkout -B more_fat")
+    c_fat = gitrepo.workspace / "c.fat"
+    c_fat.write_text("fat content c")
+    gitrepo.run("git add --all")
+    gitrepo.run("git commit --no-gpg-sign -m 'adding more fat'")
+
+    new_fatobjs = list(fatrepo.get_added_fatobjs(gitrepo.api.commit("master")))
+    assert len(new_fatobjs) == 1
+    assert new_fatobjs[0].path == "c.fat"
+
+
+def test_confirm_on_remote(fatrepo: FatRepo):
+    all_fatobjs = fatrepo.get_indexed_fatobjs()
+    fatrepo.confirm_on_remote(all_fatobjs)
+
+
+def test_fatstore_check(fatrepo: FatRepo):
+    fatrepo.fatstore_check([])
+
+
+def test_publish_added_fatobjs(fatrepo: FatRepo, s3_smudgestore: S3FatStore):
+    subprocess.run(["git-fat", "init"], cwd=str(fatrepo.workspace), stdout=sys.stdout, stderr=sys.stderr)
+    subprocess.run(
+        ["git", "checkout", "-B", "more_fat"], cwd=str(fatrepo.workspace), stdout=sys.stdout, stderr=sys.stderr
+    )
+    e_fat = fatrepo.workspace / "e.fat"
+    e_fat.write_text("fat content e")
+    test_dir = fatrepo.workspace / "test dir"
+    test_dir.mkdir(493)
+    f_fat = test_dir / "f.fat"
+    f_fat.write_text("fat content f")
+    subprocess.run(["git", "add", "--all"], cwd=str(fatrepo.workspace), stdout=sys.stdout, stderr=sys.stderr)
+
+    subprocess.run(
+        ["git", "commit", "--no-gpg-sign", "-m", "'adding more fat'"],
+        cwd=str(fatrepo.workspace),
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
+
+    subprocess.run(["git-fat", "push"], cwd=str(fatrepo.workspace), stdout=sys.stdout, stderr=sys.stderr)
+    new_fatobj_cache = fatrepo.objdir / "1d76f0a0a53de1d5255240d6aec3a383b700ca98"
+    os.remove(str(new_fatobj_cache))
+
+    master = fatrepo.gitapi.commit("master")
+    fatrepo.publish_added_fatobjs(master)
+    print(s3_smudgestore.list())

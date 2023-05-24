@@ -35,9 +35,12 @@ class S3FatStore(SyncBackend):
         return boto3.resource("s3", config=Config(signature_version="s3v4"), verify=False, **named_args)
 
     def upload(self, local_filename: str, remote_filename=None) -> None:
+        xargs = {}
+        if self.conf.get("extrapushargs"):
+            xargs["ExtraArgs"] = self.conf["extrapushargs"]
         if remote_filename is None:
             remote_filename = os.path.basename(local_filename)
-        self.bucket.upload_file(local_filename, remote_filename)
+        self.bucket.upload_file(Filename=local_filename, Key=remote_filename, **xargs)
 
     def list(self) -> List[str]:
         remote_files = [item.key for item in self.bucket.objects.all()]

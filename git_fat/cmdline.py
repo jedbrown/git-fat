@@ -6,7 +6,7 @@ import os
 import subprocess
 from typing import List
 from pathlib import Path
-from git_fat.utils import FatRepo
+from git_fat.utils import FatRepo, NoArgs
 from importlib.metadata import version
 
 __version__ = version("git-fat")
@@ -87,7 +87,13 @@ def fatstore_check_cmd(args):
         fpaths = get_valid_fpaths(args.files)
         fatrepo.fatstore_check(fpaths)
         return
-    fatrepo.fatstore_check()
+    fatrepo.fatstore_check(NoArgs())
+
+
+def fatstore_check_ref_cmd(args):
+    if getattr(args, "ref_name", None):
+        given_ref = fatrepo.gitapi.commit(args.ref_name)
+        fatrepo.fatstore_check(given_ref)
 
 
 def main():
@@ -109,12 +115,20 @@ def main():
         "fatstore-check", help="Confirm all files or passed files are downloadable from fatstore"
     )
     fatstore_check.add_argument("files", nargs="*", help="List of files to check")
+
+    fatstore_check_ref = subparsers.add_parser(
+        "fatstore-check-ref",
+        help="Confirms new fatobjs to @HEAD not in REF (default=master) are in fatstore",
+    )
+    fatstore_check_ref.add_argument("ref_name", nargs="?", default="master")
+
     pull_parser.set_defaults(func=pull_cmd)
     push_parser.set_defaults(func=push_cmd)
     init_parser.set_defaults(func=init_cmd)
     clean_parser.set_defaults(func=clean_cmd)
     smudge_parser.set_defaults(func=smudge_cmd)
     fatstore_check.set_defaults(func=fatstore_check_cmd)
+    fatstore_check_ref.set_defaults(func=fatstore_check_ref_cmd)
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)

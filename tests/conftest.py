@@ -8,9 +8,25 @@ from requests.adapters import HTTPAdapter
 import boto3
 from botocore.config import Config
 from git_fat.fatstores import S3FatStore
+from git_fat.utils import FatRepo
+from pathlib import Path
+import tomli
 
 pytest_plugins = ["docker_compose"]
-bucket_name = "munki-repo"
+bucket_name = "fatstore"
+smudge_bucket_name = "munkirepo"
+sampleconf = f"""
+[s3]
+bucket = 's3://{bucket_name}'
+endpoint = 'http://127.0.0.1:9000'
+[s3.extrapushargs]
+ACL = 'bucket-owner-full-control'
+[s3.smudgestore]
+bucket = 's3://{smudge_bucket_name}'
+endpoint = 'http://127.0.0.1:9000'
+[s3.smudgestore.extrapushargs]
+ACL = 'bucket-owner-full-control'
+"""
 
 
 class ClonedGitRepo(Workspace):
@@ -36,14 +52,11 @@ def s3_gitrepo(git_repo, resource_path_root):
     s3_test_resources = resource_path_root / "s3"
     copy_files(str(s3_test_resources), str(path))
     git_fat_conf = path / ".gitfat"
-    conf = f"""
-[s3]
-bucket = s3://{bucket_name}
-endpoint = http://127.0.0.1:9000
-extrapushargs = --acl bucket-owner-full-control"""
-    git_fat_conf.write_text(conf)
+    git_fat_conf.write_text(sampleconf)
     git_repo.run("git fat init")
     git_repo.run("git add --all")
+    git_repo.run("git config --global user.email 'you@example.com'")
+    git_repo.run("git config --global user.name 'Your Name'")
     git_repo.api.index.commit("Initial commit")
     return git_repo
 
@@ -65,8 +78,11 @@ def create_bucket(api_url):
         verify=False,
     )
     bucket = s3.Bucket(bucket_name)
+    smudge_bucket = s3.Bucket(smudge_bucket_name)
     if not bucket.creation_date:
         s3.create_bucket(Bucket=bucket_name)
+    if not smudge_bucket.creation_date:
+        s3.create_bucket(Bucket=smudge_bucket_name)
 
 
 # Invoking this fixture: 'function_scoped_container_getter' starts all services
@@ -86,14 +102,26 @@ def setup_s3(session_scoped_container_getter):
 
 
 @pytest.fixture()
-def s3_fatstore():
-    config = {
-        "bucket": bucket_name,
-        "endpoint": "http://127.0.0.1:9000",
-        # following being pulled from env
-        # "access_key_id": "root",
-        # "secret_access_key": "password",
-    }
+def fatrepo(s3_gitrepo):
+    gitrepo = s3_gitrepo
+    return FatRepo(Path(gitrepo.workspace))
 
-    fatstore = S3FatStore(config)
+
+@pytest.fixture()
+def cloned_fatrepo(s3_cloned_gitrepo):
+    gitrepo = s3_cloned_gitrepo
+    return FatRepo(Path(gitrepo.workspace))
+
+
+@pytest.fixture()
+def s3_fatstore():
+    config = tomli.loads(sampleconf)
+    fatstore = S3FatStore(config["s3"])
+    return fatstore
+
+
+@pytest.fixture()
+def s3_smudgestore():
+    config = tomli.loads(sampleconf)
+    fatstore = S3FatStore(config["s3"]["smudgestore"])
     return fatstore
