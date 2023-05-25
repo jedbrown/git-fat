@@ -36,8 +36,8 @@ class S3FatStore(SyncBackend):
 
     def upload(self, local_filename: str, remote_filename=None) -> None:
         xargs = {}
-        if self.conf.get("extrapushargs"):
-            xargs["ExtraArgs"] = self.conf["extrapushargs"]
+        if self.conf.get("xpushargs"):
+            xargs["ExtraArgs"] = self.conf["xpushargs"]
         if remote_filename is None:
             remote_filename = os.path.basename(local_filename)
         self.bucket.upload_file(Filename=local_filename, Key=remote_filename, **xargs)

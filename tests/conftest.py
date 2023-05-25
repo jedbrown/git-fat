@@ -20,12 +20,12 @@ sampleconf = f"""
 [s3]
 bucket = 's3://{bucket_name}'
 endpoint = 'http://127.0.0.1:9000'
-[s3.extrapushargs]
+[s3.xpushargs]
 ACL = 'bucket-owner-full-control'
 [s3.smudgestore]
 bucket = 's3://{smudge_bucket_name}'
 endpoint = 'http://127.0.0.1:9000'
-[s3.smudgestore.extrapushargs]
+[s3.smudgestore.xpushargs]
 ACL = 'bucket-owner-full-control'
 """
 

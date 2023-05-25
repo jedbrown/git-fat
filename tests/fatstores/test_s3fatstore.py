@@ -27,7 +27,7 @@ def test_get_bucket_name():
     [s3]
     bucket = 'munkirepo'
     endpoint = 'http://127.0.0.1:9000'
-    [s3.extrapushargs]
+    [s3.xpushargs]
     ACL = 'bucket-owner-full-control'
     """
     config = tomli.loads(sampleconf)
