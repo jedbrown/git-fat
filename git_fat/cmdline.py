@@ -9,7 +9,7 @@ from pathlib import Path
 from git_fat.utils import FatRepo, NoArgs
 from importlib.metadata import version
 
-__version__ = version("git-fat")
+__version__ = version("yelp-gitfat")
 
 fatrepo: FatRepo
 
