@@ -1,6 +1,7 @@
 from git_fat.utils import FatRepo
 from git_fat.fatstores import S3FatStore
 from pytest_git import GitRepo
+import pytest
 import os
 import io
 import sys
@@ -108,6 +109,13 @@ def test_get_added_fatobjs(s3_gitrepo: GitRepo, fatrepo: FatRepo):
 def test_confirm_on_remote(fatrepo: FatRepo):
     all_fatobjs = fatrepo.get_indexed_fatobjs()
     fatrepo.confirm_on_remote(all_fatobjs)
+
+    # TODO remove one object
+    fatrepo.fatstore.delete(list(all_fatobjs)[0].fatid)
+    with pytest.raises(SystemExit) as pytest_wrapped_e:
+        fatrepo.confirm_on_remote(all_fatobjs)
+    assert pytest_wrapped_e.type == SystemExit
+    assert pytest_wrapped_e.value.code == 1
 
 
 def test_fatstore_check(fatrepo: FatRepo):

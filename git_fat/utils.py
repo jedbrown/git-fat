@@ -46,22 +46,23 @@ class NoArgs:
 
 
 class FatObj:
-    def __init__(self, path: os.PathLike, fatid: str, size: int, abspath: os.PathLike):
+    def __init__(self, path: Path, fatid: str, size: int, working_dir: Path):
         self.fatid = fatid
-        self.path = path
-        self.spath = str(path)
-        self.abspath = abspath
+        self.path = str(path.relative_to(working_dir))
+        self.opath = path
+        self.abspath = str(path.absolute())
+        self.working_dir = working_dir
         self.size = size
 
     def __eq__(self, other):
         return (
             isinstance(other, self.__class__)
             and getattr(other, "fatid", None) == self.fatid
-            and getattr(other, "spath", None) == self.spath
+            and getattr(other, "spath", None) == self.path
         )
 
     def __hash__(self):
-        return hash(self.fatid + self.spath)
+        return hash(self.fatid + self.path)
 
 
 class FatRepo:
@@ -182,8 +183,9 @@ class FatRepo:
 
     def create_fatobj(self, blob: git.objects.Blob) -> FatObj:
         fatid, size = self.decode_fatstub(blob.data_stream.read())
+        fatobj_path = Path(blob.abspath)
 
-        return FatObj(path=blob.path, fatid=tostr(fatid), size=size, abspath=blob.abspath)
+        return FatObj(path=fatobj_path, fatid=tostr(fatid), size=size, working_dir=Path(self.workspace))
 
     def get_indexed_fatobjs(self) -> Set[FatObj]:
         """
@@ -320,10 +322,10 @@ class FatRepo:
 
         for fpath in files:
             try:
-                relativep = fpath.relative_to(self.gitapi.working_dir)  # type: ignore
-                blob = self.gitapi.tree() / str(relativep)
+                rpath = fpath.relative_to(self.gitapi.working_dir)  # type: ignore
+                blob = self.gitapi.tree() / str(rpath)
                 if not self.is_fatblob(blob):
-                    self.verbose(f"git-fat pull: {relativep} is not a fat object", force=True)
+                    self.verbose(f"git-fat pull: {rpath} is not a fat object", force=True)
                     continue
                 obj = self.create_fatobj(blob)  # type: ignore
                 self.verbose(f"git-fat pull: pulling {obj.fatid} to {obj.path}", force=True)

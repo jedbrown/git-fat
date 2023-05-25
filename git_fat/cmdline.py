@@ -82,7 +82,7 @@ def pull_cmd(args):
     sys.exit(1)
 
 
-def fatstore_check_cmd(args):
+def fscheck_cmd(args):
     if getattr(args, "files", None):
         fpaths = get_valid_fpaths(args.files)
         fatrepo.fatstore_check(fpaths)
@@ -90,7 +90,7 @@ def fatstore_check_cmd(args):
     fatrepo.fatstore_check(NoArgs())
 
 
-def fatstore_check_ref_cmd(args):
+def fscheck_new_cmd(args):
     if getattr(args, "ref_name", None):
         given_ref = fatrepo.gitapi.commit(args.ref_name)
         fatrepo.fatstore_check(given_ref)
@@ -111,24 +111,27 @@ def main():
     smudge_parser = subparsers.add_parser(
         "filter-smudge", help="Takes fatstub byte stream (STDIN) and spits out (STDOUT) corresponding bytes file"
     )
-    fatstore_check = subparsers.add_parser(
-        "fatstore-check", help="Confirm all files or passed files are downloadable from fatstore"
-    )
-    fatstore_check.add_argument("files", nargs="*", help="List of files to check")
+    fscheck = subparsers.add_parser("fscheck", help="Checks all files or passed files are on remote fatstore")
+    fscheck.add_argument("files", nargs="*", help="List of files to check")
 
-    fatstore_check_ref = subparsers.add_parser(
-        "fatstore-check-ref",
-        help="Confirms new fatobjs to @HEAD not in REF (default=master) are in fatstore",
+    fscheck_new = subparsers.add_parser(
+        "fscheck-new",
+        help="Checks new fatobjs to given REF (default=master) vs HEAD are on remote fatstore",
     )
-    fatstore_check_ref.add_argument("ref_name", nargs="?", default="master")
+    fscheck_new.add_argument("ref_name", nargs="?", default="master")
+    fspublish_new = subparsers.add_parser(
+        "fspublish-new",
+        help="Publish new fatobjs to given REF (default=master) vs HEAD to remote smudge stroe",
+    )
+    fspublish_new.add_argument("ref_name", nargs="?", default="master")
 
     pull_parser.set_defaults(func=pull_cmd)
     push_parser.set_defaults(func=push_cmd)
     init_parser.set_defaults(func=init_cmd)
     clean_parser.set_defaults(func=clean_cmd)
     smudge_parser.set_defaults(func=smudge_cmd)
-    fatstore_check.set_defaults(func=fatstore_check_cmd)
-    fatstore_check_ref.set_defaults(func=fatstore_check_ref_cmd)
+    fscheck.set_defaults(func=fscheck_cmd)
+    fscheck_new.set_defaults(func=fscheck_new_cmd)
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)

@@ -17,11 +17,37 @@
   } @ inputs:
     flake-utils.lib.eachDefaultSystem (system: let
       # see https://github.com/nix-community/poetry2nix/tree/master#api for more functions and examples.
-      inherit (poetry2nix.legacyPackages.${system}) mkPoetryApplication;
+      p2n = poetry2nix.legacyPackages.${system};
+      inherit (p2n) mkPoetryApplication;
       pkgs = nixpkgs.legacyPackages.${system};
+      pypkgs-build-requirements = {
+        path-py = ["setuptools"];
+        pytest = ["hatchling"];
+        pytest-env = ["hatchling" "hatch-vcs"];
+        pytest-git = ["setuptools"];
+      };
+      p2n-overrides = p2n.defaultPoetryOverrides.extend (
+        self: super:
+          builtins.mapAttrs (
+            package: build-requirements:
+              (builtins.getAttr package super).overridePythonAttrs (old: {
+                buildInputs =
+                  (old.buildInputs or [])
+                  ++ (builtins.map (pkg:
+                    if builtins.isString pkg
+                    then builtins.getAttr pkg super
+                    else pkg)
+                  build-requirements);
+              })
+          )
+          pypkgs-build-requirements
+      );
     in {
       packages = {
-        git-fat = mkPoetryApplication {projectDir = self;};
+        git-fat = mkPoetryApplication {
+          projectDir = self;
+          overrides = p2n-overrides;
+        };
         default = self.packages.${system}.git-fat;
       };
 

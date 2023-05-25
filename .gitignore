@@ -164,3 +164,7 @@ cython_debug/
 .direnv
 .envrc
 
+# nix
+result/
+result/*
+result

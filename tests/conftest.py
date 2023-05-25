@@ -11,6 +11,7 @@ from git_fat.fatstores import S3FatStore
 from git_fat.utils import FatRepo
 from pathlib import Path
 import tomli
+import os
 
 pytest_plugins = ["docker_compose"]
 bucket_name = "fatstore"
@@ -55,8 +56,9 @@ def s3_gitrepo(git_repo, resource_path_root):
     git_fat_conf.write_text(sampleconf)
     git_repo.run("git fat init")
     git_repo.run("git add --all")
-    git_repo.run("git config --global user.email 'you@example.com'")
-    git_repo.run("git config --global user.name 'Your Name'")
+    if os.getenv("GITHUB_ACTION"):
+        git_repo.run("git config --global user.email 'you@example.com'")
+        git_repo.run("git config --global user.name 'Your Name'")
     git_repo.api.index.commit("Initial commit")
     return git_repo
 
