@@ -96,6 +96,12 @@ def fscheck_new_cmd(args):
         fatrepo.fatstore_check(given_ref)
 
 
+def fspublish_new_cmd(args):
+    if getattr(args, "ref_name", None):
+        given_ref = fatrepo.gitapi.commit(args.ref_name)
+        fatrepo.publish_added_fatobjs(given_ref)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Large (fat) file manager for git")
     parser.add_argument("-v", "--version", action="store_true", help="Show package version")
@@ -132,6 +138,7 @@ def main():
     smudge_parser.set_defaults(func=smudge_cmd)
     fscheck.set_defaults(func=fscheck_cmd)
     fscheck_new.set_defaults(func=fscheck_new_cmd)
+    fspublish_new.set_defaults(func=fspublish_new_cmd)
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
