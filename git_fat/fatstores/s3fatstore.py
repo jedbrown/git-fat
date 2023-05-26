@@ -3,6 +3,9 @@ import boto3
 import os
 from .syncbackend import SyncBackend
 from botocore.config import Config
+import botocore.vendored.requests.packages.urllib3 as urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)  # type: ignore
 
 
 class S3FatStore(SyncBackend):
