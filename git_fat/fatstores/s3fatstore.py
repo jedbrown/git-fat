@@ -16,6 +16,7 @@ class S3FatStore(SyncBackend):
 
         self.s3 = self.get_s3_resource()
         self.bucket = self.s3.Bucket(self.bucket_name)
+        os.environ["PYTHONWARNINGS"] = "ignore:Unverified HTTPS request"
 
     def get_bucket_name(self, possible_name: str):
         s3_uri_prefix = "s3://"
