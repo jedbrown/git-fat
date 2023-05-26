@@ -3,6 +3,8 @@ import boto3
 import os
 from .syncbackend import SyncBackend
 from botocore.config import Config
+from urllib3.exceptions import InsecureRequestWarning
+from urllib3 import disable_warnings
 
 
 class S3FatStore(SyncBackend):
@@ -16,7 +18,7 @@ class S3FatStore(SyncBackend):
 
         self.s3 = self.get_s3_resource()
         self.bucket = self.s3.Bucket(self.bucket_name)
-        os.environ["PYTHONWARNINGS"] = "ignore:Unverified HTTPS request"
+        disable_warnings(InsecureRequestWarning)
 
     def get_bucket_name(self, possible_name: str):
         s3_uri_prefix = "s3://"
