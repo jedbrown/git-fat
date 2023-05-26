@@ -1,10 +1,21 @@
 ---
-- id: fatstore-check
-  name: fatstore-check
-  description: Large (fat) file manager
-  entry: git-fat fatstore-check
+- id: gitfat-check
+  name: gitfat-check
+  description: Large (fat) file manager fatobj verifier
+  entry: git-fat fscheck
   language: python
   stages: [pre-merge-commit, manual]
+  minimum_pre_commit_version: 2.9.2
+  verbose: true
+  require_serial: true
+
+- id: gitfat-check-new
+  name: gitfat-check-new
+  description: Large (fat) file manager verifier for new fatobjs in branch
+  pass_filenames: false
+  entry: git-fat fscheck-new
+  language: python
+  stages: [pre-commit, manual]
   minimum_pre_commit_version: 2.9.2
   verbose: true
   require_serial: true
