@@ -3,9 +3,6 @@ import boto3
 import os
 from .syncbackend import SyncBackend
 from botocore.config import Config
-import botocore.vendored.requests.packages.urllib3 as urllib3
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)  # type: ignore
 
 
 class S3FatStore(SyncBackend):
@@ -36,7 +33,7 @@ class S3FatStore(SyncBackend):
             named_args["aws_access_key_id"] = self.conf.get("id")  # pragma: no cover
             named_args["aws_secret_access_key"] = self.conf.get("secret")  # pragma: no cover
 
-        return boto3.resource("s3", config=Config(signature_version="s3v4"), verify=False, **named_args)
+        return boto3.resource("s3", config=Config(signature_version="s3v4"), **named_args)
 
     def upload(self, local_filename: str, remote_filename=None) -> None:
         xargs = {}
