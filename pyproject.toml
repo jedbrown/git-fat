@@ -14,7 +14,6 @@ git-fat = "git_fat.cmdline:main"
 python = "^3.10"
 gitpython = "^3.1.31"
 boto3 = "^1.26.126"
-multipledispatch = "^0.6.0"
 tomli = "^2.0.1"
 
 [tool.poetry.group.dev.dependencies]
