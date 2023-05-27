@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "yelp-gitfat"
-version = "1.1.4"
+version = "1.1.5"
 description = "Simple way to handle large git files without committing them to git"
 authors = ["Carlos Hernandez <carlos@hrndz.ca>"]
 license = "BSD-2"
