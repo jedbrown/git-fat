@@ -13,7 +13,7 @@ class S3FatStore(SyncBackend):
         conf: Dict,
     ):
         self.bucket_name = self.get_bucket_name(conf["bucket"])
-        self.prefix = conf.get("perfix")
+        self.prefix = conf.get("perfix", "")
         self.conf = conf
 
         self.s3 = self.get_s3_resource()
@@ -43,15 +43,32 @@ class S3FatStore(SyncBackend):
             xargs["ExtraArgs"] = self.conf["xpushargs"]
         if remote_filename is None:
             remote_filename = os.path.basename(local_filename)
+        if self.prefix:
+            remote_filename = os.path.join(self.prefix, remote_filename)
         self.bucket.upload_file(Filename=local_filename, Key=remote_filename, **xargs)
 
+    def strip_prefix(self, identifier):
+        if identifier.startswith(self.prefix) and self.prefix:
+            return identifier[len(self.prefix) :]
+        return identifier
+
     def list(self) -> List[str]:
-        remote_files = [item.key for item in self.bucket.objects.all()]
+        if self.prefix:
+            remote_objs = self.bucket.objects.filter(prefix=self.prefix).all()
+        else:
+            remote_objs = self.bucket.objects.all()
+        remote_files = [self.strip_prefix(item.key) for item in remote_objs]
         return remote_files
 
     def download(self, remote_filename: str, local_filename: os.PathLike) -> None:
+        if self.prefix:
+            remote_filename = os.path.join(self.prefix, remote_filename)
         self.bucket.download_file(remote_filename, local_filename)
 
     def delete(self, filename: str) -> None:
-        s3_object = self.bucket.Object(filename)
+        if self.prefix:
+            remote_fname = os.path.join(self.prefix, filename)
+        else:
+            remote_fname = filename
+        s3_object = self.bucket.Object(remote_fname)
         s3_object.delete()
