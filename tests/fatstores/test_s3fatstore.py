@@ -1,7 +1,3 @@
-from git_fat.fatstores import S3FatStore
-import tomli
-
-
 def test_upload_file(workspace, s3_fatstore):
     test_file = workspace.workspace / "test.txt"
     test_file.write_text("Hello World\n")
@@ -10,6 +6,18 @@ def test_upload_file(workspace, s3_fatstore):
 
 def test_list(s3_fatstore):
     files = s3_fatstore.list()
+    print(files)
+    assert len(files) >= 1
+
+
+def test_upload_file_with_prefix(workspace, s3_fatstore_with_prefix):
+    test_file = workspace.workspace / "test.txt"
+    test_file.write_text("Hello World\n")
+    s3_fatstore_with_prefix.upload(test_file.abspath())
+
+
+def test_list_with_prefix(s3_fatstore_with_prefix):
+    files = s3_fatstore_with_prefix.list()
     print(files)
     assert len(files) >= 1
 
@@ -23,16 +31,10 @@ def test_download_file(workspace, s3_fatstore):
 
 
 def test_get_bucket_name():
-    sampleconf = """
-    [s3]
-    bucket = 'munkirepo'
-    endpoint = 'http://127.0.0.1:9000'
-    [s3.xpushargs]
-    ACL = 'bucket-owner-full-control'
-    """
-    config = tomli.loads(sampleconf)
-    fatstore = S3FatStore(config["s3"])
-    assert fatstore.get_bucket_name("munkirepo") == "munkirepo"
+    from git_fat.fatstores.s3fatstore import get_bucket_name
+
+    assert get_bucket_name("munkirepo") == "munkirepo"
+    assert get_bucket_name("s3://munkirepo") == "munkirepo"
 
 
 def test_delete(s3_fatstore):

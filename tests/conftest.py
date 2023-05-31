@@ -123,6 +123,13 @@ def s3_fatstore():
 
 
 @pytest.fixture()
+def s3_fatstore_with_prefix():
+    config = {"bucket": f"s3://{bucket_name}", "endpoint": "http://127.0.0.1:9000", "prefix": "munki_repo"}
+    fatstore = S3FatStore(config)
+    return fatstore
+
+
+@pytest.fixture()
 def s3_smudgestore():
     config = tomli.loads(sampleconf)
     fatstore = S3FatStore(config["s3"]["smudgestore"])
